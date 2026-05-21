@@ -12,7 +12,7 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 1.28;
 renderer.setClearColor(0x02020a, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -36,6 +36,7 @@ const qaState = {
   rotationZ: 0.02,
   tileCount: 0,
   animatedTileColor: [0, 0, 0],
+  environmentMap: "",
 };
 
 window.__discoQA = qaState;
@@ -68,7 +69,7 @@ const HINGE_ROTATION_Z = 0.02;
 const DRAG_ROTATION_PER_PIXEL = 0.0049;
 const MAX_INTERACTION_VELOCITY = 5.4;
 
-const environmentTexture = createEnvironmentTexture();
+const environmentTexture = createEnvironmentMap();
 scene.environment = environmentTexture;
 
 scene.add(new THREE.AmbientLight(0x2a35a5, 0.72));
@@ -189,6 +190,7 @@ function animate() {
   canvas.dataset.rotationZ = qaState.rotationZ.toFixed(5);
   canvas.dataset.tileCount = String(qaState.tileCount);
   canvas.dataset.animatedTileColor = qaState.animatedTileColor.join(",");
+  canvas.dataset.environmentMap = qaState.environmentMap;
 }
 
 function applyAngularVelocity(delta) {
@@ -365,7 +367,7 @@ function createCodexDiscoTiles() {
     clearcoat: 1,
     clearcoatRoughness: 0.14,
     envMap: environmentTexture,
-    envMapIntensity: 3.2,
+    envMapIntensity: 4.35,
     metalness: 1,
     reflectivity: 1,
     roughness: 0.16,
@@ -483,7 +485,7 @@ function createCoreSurface() {
       clearcoatRoughness: 0.2,
       color: 0x05074a,
       envMap: environmentTexture,
-      envMapIntensity: 1.25,
+      envMapIntensity: 1.55,
       metalness: 0.64,
       roughness: 0.34,
     }),
@@ -600,7 +602,7 @@ function createPromptGlyph() {
     emissive: 0x0a0f46,
     emissiveIntensity: 0.7,
     envMap: environmentTexture,
-    envMapIntensity: 1.8,
+    envMapIntensity: 2.35,
     metalness: 0.55,
     roughness: 0.28,
     side: THREE.DoubleSide,
@@ -628,7 +630,7 @@ function createPromptGlyph() {
     emissive: 0xbfdcff,
     emissiveIntensity: 3.15,
     envMap: environmentTexture,
-    envMapIntensity: 6.2,
+    envMapIntensity: 7.4,
     ior: 1.62,
     iridescence: 0.42,
     iridescenceIOR: 1.35,
@@ -1066,6 +1068,86 @@ function createStarfield() {
       vertexColors: true,
     }),
   );
+}
+
+function createEnvironmentMap() {
+  const hdrTexture = createHdrEnvironmentTexture();
+
+  try {
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    const environmentMap = pmremGenerator.fromEquirectangular(hdrTexture).texture;
+
+    hdrTexture.dispose();
+    pmremGenerator.dispose();
+    qaState.environmentMap = "procedural-float-hdr-pmrem";
+
+    return environmentMap;
+  } catch (error) {
+    console.warn("Falling back to canvas environment map.", error);
+    hdrTexture.dispose();
+    qaState.environmentMap = "canvas-ldr-fallback";
+
+    return createEnvironmentTexture();
+  }
+}
+
+function createHdrEnvironmentTexture() {
+  const width = 512;
+  const height = 256;
+  const data = new Float32Array(width * height * 4);
+  const lightDomes = [
+    { color: [15.5, 12.0, 23.0], radius: 0.105, stretch: 0.72, u: 0.09, v: 0.22 },
+    { color: [3.2, 18.5, 24.0], radius: 0.13, stretch: 0.55, u: 0.34, v: 0.34 },
+    { color: [19.5, 3.6, 14.0], radius: 0.12, stretch: 0.62, u: 0.63, v: 0.19 },
+    { color: [24.0, 23.0, 20.0], radius: 0.072, stretch: 0.5, u: 0.86, v: 0.43 },
+    { color: [5.0, 7.5, 25.0], radius: 0.16, stretch: 0.78, u: 0.72, v: 0.72 },
+  ];
+
+  for (let y = 0; y < height; y += 1) {
+    const v = y / (height - 1);
+    const horizon = Math.exp(-Math.pow((v - 0.52) / 0.18, 2));
+    const ceilingGlow = Math.exp(-Math.pow(v / 0.38, 2));
+    const floorGlow = Math.exp(-Math.pow((1 - v) / 0.22, 2));
+
+    for (let x = 0; x < width; x += 1) {
+      const u = x / (width - 1);
+      const offset = (y * width + x) * 4;
+      const sweep = Math.pow(Math.max(0, Math.cos((u * 9.5 + v * 1.65) * Math.PI)), 18);
+      const oppositeSweep = Math.pow(Math.max(0, Math.sin((u * 7.25 - v * 1.1) * Math.PI)), 20);
+      let red = 0.015 + horizon * 0.055 + ceilingGlow * 0.02 + floorGlow * 0.018;
+      let green = 0.018 + horizon * 0.085 + ceilingGlow * 0.018 + floorGlow * 0.024;
+      let blue = 0.05 + horizon * 0.24 + ceilingGlow * 0.12 + floorGlow * 0.06;
+
+      red += sweep * 1.35 + oppositeSweep * 0.18;
+      green += sweep * 0.2 + oppositeSweep * 0.9;
+      blue += sweep * 2.4 + oppositeSweep * 1.7;
+
+      lightDomes.forEach((light) => {
+        const du = Math.min(Math.abs(u - light.u), 1 - Math.abs(u - light.u));
+        const dv = (v - light.v) / light.stretch;
+        const energy = Math.exp(-(du * du + dv * dv) / (light.radius * light.radius));
+
+        red += light.color[0] * energy;
+        green += light.color[1] * energy;
+        blue += light.color[2] * energy;
+      });
+
+      data[offset] = red;
+      data[offset + 1] = green;
+      data[offset + 2] = blue;
+      data[offset + 3] = 1;
+    }
+  }
+
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  texture.colorSpace = THREE.LinearSRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.needsUpdate = true;
+
+  return texture;
 }
 
 function createEnvironmentTexture() {
