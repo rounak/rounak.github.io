@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A rotating 3D Codex disco icon rendered with Three.js."
+    />
+    <meta name="theme-color" content="#05062d" />
+    <title>Codex Disco</title>
+    <link rel="icon" href="./assets/codex-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="app" aria-label="Rotating 3D Codex disco icon">
+      <canvas id="scene" aria-label="Three dimensional rotating disco ball"></canvas>
+
+      <div class="ui">
+        <button
+          id="toggle-motion"
+          class="icon-button"
+          type="button"
+          aria-label="Pause rotation"
+          title="Pause rotation"
+        >
+          <svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1.4"></rect>
+            <rect x="14" y="5" width="4" height="14" rx="1.4"></rect>
+          </svg>
+          <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5.5v13l11-6.5z"></path>
+          </svg>
+        </button>
+        <input
+          id="speed"
+          class="speed"
+          type="range"
+          min="0.35"
+          max="1.85"
+          value="1"
+          step="0.05"
+          aria-label="Rotation speed"
+        />
+      </div>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
