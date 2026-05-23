@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A brushed blue velvet Codex pillow rendered in 3D with pointer-reactive nap patterns."
+    />
+    <meta name="theme-color" content="#05091a" />
+    <title>Codex Velvet Pillow</title>
+    <link rel="icon" href="../codex-disco-render/assets/codex-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="app" aria-label="Interactive 3D blue velvet pillow">
+      <canvas id="scene" aria-label="Three dimensional blue velvet pillow"></canvas>
+
+      <div class="ui" aria-label="Pillow controls">
+        <button
+          id="toggle-motion"
+          class="icon-button"
+          type="button"
+          aria-label="Pause motion"
+          title="Pause motion"
+        >
+          <svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1.4"></rect>
+            <rect x="14" y="5" width="4" height="14" rx="1.4"></rect>
+          </svg>
+          <svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5.5v13l11-6.5z"></path>
+          </svg>
+        </button>
+        <button
+          id="reset-nap"
+          class="icon-button"
+          type="button"
+          aria-label="Smooth velvet"
+          title="Smooth velvet"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 4a8 8 0 1 0 7.44 5.04l-1.85.77A6 6 0 1 1 16.23 7H13V5h7v7h-2V8.41A7.96 7.96 0 0 0 12 4z"></path>
+          </svg>
+        </button>
+        <input
+          id="brush-size"
+          class="brush-size"
+          type="range"
+          min="34"
+          max="118"
+          value="72"
+          step="1"
+          aria-label="Brush width"
+        />
+      </div>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
