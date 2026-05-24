@@ -40,8 +40,22 @@ const qaState = {
 
 window.__pillowQA = qaState;
 
-const PILLOW_WIDTH = 1.18;
-const PILLOW_HEIGHT = 1.1;
+// Same 96-sample Codex outline used by the disco render.
+const ICON_OUTLINE_SAMPLES = [
+  1.0110, 0.9909, 0.9674, 0.9405, 0.9103, 0.9371, 0.9674, 0.9909, 1.0144,
+  1.0278, 1.0413, 1.0446, 1.0480, 1.0446, 1.0413, 1.0245, 1.0110, 0.9909,
+  0.9640, 0.9371, 0.9069, 0.9405, 0.9674, 0.9909, 1.0110, 1.0278, 1.0379,
+  1.0413, 1.0480, 1.0446, 1.0379, 1.0245, 1.0110, 0.9909, 0.9674, 0.9405,
+  0.9069, 0.9405, 0.9674, 0.9909, 1.0144, 1.0278, 1.0379, 1.0446, 1.0480,
+  1.0446, 1.0379, 1.0278, 1.0144, 0.9909, 0.9674, 0.9405, 0.9103, 0.9405,
+  0.9674, 0.9942, 1.0110, 1.0278, 1.0413, 1.0480, 1.0480, 1.0446, 1.0413,
+  1.0245, 1.0110, 0.9909, 0.9640, 0.9371, 0.9069, 0.9405, 0.9674, 0.9909,
+  1.0077, 1.0245, 1.0379, 1.0413, 1.0480, 1.0446, 1.0379, 1.0278, 1.0110,
+  0.9909, 0.9707, 0.9405, 0.9103, 0.9371, 0.9674, 0.9909, 1.0110, 1.0278,
+  1.0379, 1.0446, 1.0480, 1.0446, 1.0379, 1.0278,
+];
+const PILLOW_OUTLINE_SCALE = 1.12;
+const PILLOW_UV_EXTENT = 1.28;
 const EDGE_Z = 0.18;
 const BULGE_Z = 0.52;
 
@@ -237,7 +251,6 @@ function createPillow() {
   const side = new THREE.Mesh(sideGeometry, velvetMaterial);
   const frontPipe = createPiping(1, 1.012, 0.042, cordMaterial);
   const backPipe = createPiping(-1, 1.012, 0.038, cordMaterial);
-  const sideButtons = createSoftCornerDimples();
 
   front.frustumCulled = false;
   back.frustumCulled = false;
@@ -245,7 +258,7 @@ function createPillow() {
   frontPipe.frustumCulled = false;
   backPipe.frustumCulled = false;
 
-  group.add(back, side, front, frontPipe, backPipe, sideButtons);
+  group.add(back, side, front, frontPipe, backPipe);
 
   return {
     brushTargets: [front, back],
@@ -258,7 +271,7 @@ function createPillow() {
 }
 
 function createPillowFaceGeometry(side) {
-  const segments = 88;
+  const segments = 104;
   const rowSize = segments + 1;
   const positions = [];
   const uvs = [];
@@ -270,11 +283,17 @@ function createPillowFaceGeometry(side) {
 
     for (let column = 0; column <= segments; column += 1) {
       const u = column / segments * 2 - 1;
-      const point = pillowFacePoint(u, v, side);
-      const edgePressure = smoothstep(0.72, 1, Math.max(Math.abs(u), Math.abs(v)));
+      const polar = squarePointToPolar(u, v);
+      const point = pillowFacePoint(polar.angle, polar.radial, side);
+      const edgePressure = smoothstep(0.72, 1, polar.radial);
 
       positions.push(point.x, point.y, point.z);
-      uvs.push(side > 0 ? (u + 1) * 0.5 : 1 - (u + 1) * 0.5, (v + 1) * 0.5);
+      uvs.push(
+        side > 0
+          ? 0.5 + point.x / (PILLOW_UV_EXTENT * 2)
+          : 0.5 - point.x / (PILLOW_UV_EXTENT * 2),
+        0.5 + point.y / (PILLOW_UV_EXTENT * 2),
+      );
       edgePressures.push(edgePressure);
     }
   }
@@ -306,8 +325,8 @@ function createPillowFaceGeometry(side) {
 }
 
 function createPillowSideGeometry() {
-  const perimeter = createBoundarySamples(1, 1, 44);
-  const backPerimeter = createBoundarySamples(-1, 1, 44);
+  const perimeter = createBoundarySamples(1, 1, 192);
+  const backPerimeter = createBoundarySamples(-1, 1, 192);
   const sideSegments = 18;
   const positions = [];
   const uvs = [];
@@ -360,59 +379,55 @@ function createPillowSideGeometry() {
   return geometry;
 }
 
-function pillowFacePoint(u, v, side) {
-  const ax = Math.abs(u);
-  const ay = Math.abs(v);
-  const edge = Math.max(ax, ay);
-  const corner = Math.pow(ax * ay, 1.55);
-  const edgePressure = smoothstep(0.7, 1, edge);
-  const coreBulge = Math.pow(Math.max(0, 1 - Math.pow(ax, 2.65)), 0.74)
-    * Math.pow(Math.max(0, 1 - Math.pow(ay, 2.65)), 0.74);
-  const squircleX = u * PILLOW_WIDTH * (1 - 0.17 * Math.pow(ay, 2.18));
-  const squircleY = v * PILLOW_HEIGHT * (1 - 0.15 * Math.pow(ax, 2.18));
-  const cornerTuck = 1 - corner * 0.1;
-  const seamPinch = 1 - edgePressure * 0.03;
-  const wrinkle =
-    Math.sin((u * 4.8 + v * 1.2) * Math.PI) * 0.0045
-    + Math.sin((v * 4.6 - u * 0.7) * Math.PI) * 0.0035;
+function pillowFacePoint(angle, radial, side) {
+  const outline = sampleIconOutline(angle) * PILLOW_OUTLINE_SCALE;
+  const easedRadial = Math.pow(radial, 0.94);
+  const edgePressure = smoothstep(0.72, 1, radial);
+  const coreBulge = Math.pow(Math.max(0, 1 - Math.pow(radial, 2.38)), 0.78);
+  const seamPinch = 1 - edgePressure * 0.035;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const x = cos * outline * easedRadial * seamPinch;
+  const y = sin * outline * easedRadial * seamPinch;
+  const wrinkleFade = smoothstep(0.28, 0.82, radial);
+  const wrinkle = wrinkleFade * (
+    Math.sin((cos * 4.8 + sin * 1.2) * Math.PI + radial * 1.1) * 0.0045
+    + Math.sin((sin * 4.6 - cos * 0.7) * Math.PI - radial * 0.8) * 0.0035
+  );
   const crown = EDGE_Z + BULGE_Z * coreBulge;
   const z = side * (crown + wrinkle * (0.25 + coreBulge * 0.75));
 
-  return new THREE.Vector3(
-    squircleX * cornerTuck * seamPinch,
-    squircleY * cornerTuck * seamPinch,
-    z,
-  );
+  return new THREE.Vector3(x, y, z);
 }
 
-function createBoundarySamples(side, inset = 1, samplesPerSide = 36) {
+function squarePointToPolar(u, v) {
+  const distance = Math.hypot(u, v);
+
+  if (distance < 0.0001) {
+    return { angle: 0, radial: 0 };
+  }
+
+  const angle = Math.atan2(v, u);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const radial = Math.min(1, distance * Math.max(Math.abs(cos), Math.abs(sin)));
+
+  return { angle, radial };
+}
+
+function createBoundarySamples(side, inset = 1, samples = 144) {
   const points = [];
 
-  for (let i = 0; i < samplesPerSide; i += 1) {
-    const t = i / samplesPerSide * 2 - 1;
-    points.push(pillowFacePoint(t * inset, -inset, side));
-  }
-
-  for (let i = 0; i < samplesPerSide; i += 1) {
-    const t = i / samplesPerSide * 2 - 1;
-    points.push(pillowFacePoint(inset, t * inset, side));
-  }
-
-  for (let i = 0; i < samplesPerSide; i += 1) {
-    const t = 1 - i / samplesPerSide * 2;
-    points.push(pillowFacePoint(t * inset, inset, side));
-  }
-
-  for (let i = 0; i < samplesPerSide; i += 1) {
-    const t = 1 - i / samplesPerSide * 2;
-    points.push(pillowFacePoint(-inset, t * inset, side));
+  for (let index = 0; index < samples; index += 1) {
+    const angle = index / samples * Math.PI * 2;
+    points.push(pillowFacePoint(angle, inset, side));
   }
 
   return points;
 }
 
 function createPiping(side, inset, radius, material) {
-  const points = createBoundarySamples(side, inset, 48).map((point) => {
+  const points = createBoundarySamples(side, inset, 192).map((point) => {
     const normalOffset = new THREE.Vector3(point.x, point.y, 0).normalize().multiplyScalar(0.018);
     return new THREE.Vector3(point.x + normalOffset.x, point.y + normalOffset.y, point.z + side * 0.024);
   });
@@ -424,33 +439,6 @@ function createPiping(side, inset, radius, material) {
   geometry.computeVertexNormals();
 
   return new THREE.Mesh(geometry, material);
-}
-
-function createSoftCornerDimples() {
-  const group = new THREE.Group();
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x000000,
-    depthWrite: false,
-    opacity: 0.16,
-    transparent: true,
-  });
-  const texture = createDimpleTexture();
-
-  [
-    [-0.98, -0.72],
-    [0.98, -0.72],
-    [0.98, 0.72],
-    [-0.98, 0.72],
-  ].forEach(([x, y], index) => {
-    const sprite = new THREE.Sprite(material.clone());
-    sprite.material.map = texture;
-    sprite.position.set(x, y, 0.43);
-    sprite.scale.set(0.42, 0.28, 1);
-    sprite.rotation.z = index * Math.PI * 0.5;
-    group.add(sprite);
-  });
-
-  return group;
 }
 
 function createVelvetMaterial(brushMap, noiseMap) {
@@ -905,24 +893,6 @@ function createShadowTexture() {
   return new THREE.CanvasTexture(textureCanvas);
 }
 
-function createDimpleTexture() {
-  const textureCanvas = document.createElement("canvas");
-  const size = 256;
-  const context = textureCanvas.getContext("2d");
-
-  textureCanvas.width = size;
-  textureCanvas.height = size;
-
-  const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, "rgba(0, 0, 0, 0.72)");
-  gradient.addColorStop(0.38, "rgba(0, 0, 0, 0.24)");
-  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-
-  return new THREE.CanvasTexture(textureCanvas);
-}
-
 function createShardTexture() {
   const textureCanvas = document.createElement("canvas");
   const width = 512;
@@ -955,6 +925,20 @@ function smoothstep(edge0, edge1, value) {
   const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
 
   return t * t * (3 - 2 * t);
+}
+
+function sampleIconOutline(angle) {
+  const normalizedAngle = (angle + Math.PI * 2) % (Math.PI * 2);
+  const samplePosition = (normalizedAngle / (Math.PI * 2)) * ICON_OUTLINE_SAMPLES.length;
+  const sampleIndex = Math.floor(samplePosition);
+  const nextIndex = (sampleIndex + 1) % ICON_OUTLINE_SAMPLES.length;
+  const t = samplePosition - sampleIndex;
+
+  return THREE.MathUtils.lerp(
+    ICON_OUTLINE_SAMPLES[sampleIndex],
+    ICON_OUTLINE_SAMPLES[nextIndex],
+    t,
+  );
 }
 
 function seededNoise(seed) {
