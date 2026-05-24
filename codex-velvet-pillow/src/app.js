@@ -119,7 +119,11 @@ brushSizeInput.addEventListener("input", () => {
 canvas.addEventListener("pointerdown", (event) => {
   activePointerId = event.pointerId;
   lastBrushLocalPoint = null;
-  canvas.setPointerCapture(event.pointerId);
+  try {
+    canvas.setPointerCapture(event.pointerId);
+  } catch {
+    // Synthetic QA events do not register an active browser pointer for capture.
+  }
   updatePointer(event);
   reverseSequinsFromPointer(event);
   event.preventDefault();
@@ -230,11 +234,6 @@ function reverseSequinsFromPointer(event) {
 
   const localPoint = pillow.group.worldToLocal(intersections[0].point.clone());
 
-  if (Math.abs(localPoint.z) < 0.02) {
-    hoverFade = 0;
-    return;
-  }
-
   const brushRadius = THREE.MathUtils.mapLinear(
     brushSize,
     Number.parseFloat(brushSizeInput.min),
@@ -290,11 +289,12 @@ function createPillow() {
   const group = new THREE.Group();
   const bodyGeometry = createCushionGeometry();
   const body = new THREE.Mesh(bodyGeometry, fabricMaterial);
-  const frontSeam = createSeamCord(FRONT_SIDE, 0.952, 0.0085);
-  const backSeam = createSeamCord(-FRONT_SIDE, 0.952, 0.008);
+  const frontSeam = createSeamCord(FRONT_SIDE, 0.944, 0.006);
+  const backSeam = createSeamCord(-FRONT_SIDE, 0.944, 0.0055);
   const frontSequins = createSequinSystem(FRONT_SIDE, 0);
   const backSequins = createSequinSystem(-FRONT_SIDE, 14000);
-  const sequins = createTwoSidedSequinSystem(frontSequins, backSequins);
+  const sideSequins = createSideSequinSystem(28000);
+  const sequins = createSequinCollection(frontSequins, backSequins, sideSequins);
   const promptGlyph = createPromptGlyph();
 
   body.frustumCulled = false;
@@ -302,11 +302,12 @@ function createPillow() {
   backSeam.frustumCulled = false;
   frontSequins.mesh.frustumCulled = false;
   backSequins.mesh.frustumCulled = false;
+  sideSequins.mesh.frustumCulled = false;
   promptGlyph.traverse((child) => {
     child.frustumCulled = false;
   });
 
-  group.add(body, backSequins.mesh, frontSequins.mesh, frontSeam, backSeam, promptGlyph);
+  group.add(body, sideSequins.mesh, backSequins.mesh, frontSequins.mesh, frontSeam, backSeam, promptGlyph);
 
   return {
     brushTargets: [body],
@@ -650,63 +651,285 @@ function createSequinSystem(side = FRONT_SIDE, seedOffset = 0) {
   };
 }
 
-function createTwoSidedSequinSystem(front, back) {
+function createSideSequinSystem(seedOffset = 0) {
+  const records = [];
+  const depthRowCount = 13;
+  const angleCount = 216;
+  const spacing = 0.052;
+
+  for (let row = 0; row < depthRowCount; row += 1) {
+    const depth = -1 + (row / (depthRowCount - 1)) * 2;
+
+    for (let index = 0; index < angleCount; index += 1) {
+      const seed = seedOffset + records.length;
+      const angle = ((index + (row % 2) * 0.5) / angleCount) * Math.PI * 2;
+      const jitterAngle = (seededNoise(seed * 12.4) - 0.5) * 0.014;
+      const jitterDepth = (seededNoise(seed * 7.8) - 0.5) * 0.038;
+      const sideAngle = angle + jitterAngle;
+      const sideDepth = depth + jitterDepth;
+      const direction = new THREE.Vector3(
+        Math.cos(sideAngle),
+        Math.sin(sideAngle),
+        sideDepth,
+      ).normalize();
+      const surfacePoint = cushionPointFromDirection(direction);
+      const normal = new THREE.Vector3(
+        direction.x,
+        direction.y,
+        direction.z / PILLOW_DEPTH_SCALE,
+      ).normalize();
+      const tangent = new THREE.Vector3(-Math.sin(sideAngle), Math.cos(sideAngle), 0)
+        .projectOnPlane(normal)
+        .normalize();
+      const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+      const baseHue = 0.595 + seededNoise(seed * 4.2) * 0.045;
+      const frontColor = new THREE.Color().setHSL(
+        baseHue,
+        0.84,
+        0.33 + seededNoise(seed * 6.3) * 0.15,
+      );
+      const reverseColor = new THREE.Color().setHSL(
+        0.535 + seededNoise(seed * 8.6) * 0.045,
+        0.43 + seededNoise(seed * 5.9) * 0.13,
+        0.48 + seededNoise(seed * 7.1) * 0.11,
+      );
+
+      records.push({
+        bitangent,
+        flipped: false,
+        frontColor,
+        hinge: seededNoise(seed * 3.8) > 0.5 ? 1 : -1,
+        normal,
+        phase: seededNoise(seed * 11.7) * Math.PI * 2,
+        position: surfacePoint.clone().addScaledVector(normal, 0.057 + seededNoise(seed * 15.2) * 0.004),
+        radius: spacing * (0.66 + seededNoise(seed * 2.9) * 0.08),
+        reverseColor,
+        scaleX: 0.96 + seededNoise(seed * 18.8) * 0.12,
+        scaleY: 0.92 + seededNoise(seed * 21.6) * 0.14,
+        spin: seededNoise(seed * 5.4) * Math.PI * 2,
+        surfacePoint,
+        tangent,
+        x: surfacePoint.x,
+        y: surfacePoint.y,
+      });
+    }
+  }
+
+  const geometry = createSequinGeometry();
+  const mesh = new THREE.InstancedMesh(geometry, sequinMaterial, records.length);
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  const zAxis = new THREE.Vector3(0, 0, 1);
+  const qBase = new THREE.Quaternion();
+  const qSpin = new THREE.Quaternion();
+  const qTilt = new THREE.Quaternion();
+  const tiltAxis = new THREE.Vector3(1, 0, 0);
+
+  function updateInstance(index) {
+    const record = records[index];
+    const tilt = record.flipped
+      ? record.hinge * (0.35 + seededNoise((seedOffset + index) * 12.5) * 0.12)
+      : record.hinge * (-0.05 + seededNoise((seedOffset + index) * 10.4) * 0.08);
+
+    qBase.setFromUnitVectors(zAxis, record.normal);
+    qSpin.setFromAxisAngle(zAxis, record.spin);
+    qTilt.setFromAxisAngle(tiltAxis, tilt);
+
+    dummy.position.copy(record.position);
+    dummy.position.addScaledVector(record.normal, record.flipped ? 0.012 : 0);
+    dummy.quaternion.copy(qBase).multiply(qSpin).multiply(qTilt);
+    dummy.scale.set(record.radius * record.scaleX, record.radius * record.scaleY, record.radius);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(index, dummy.matrix);
+
+    color.copy(record.flipped ? record.reverseColor : record.frontColor);
+    mesh.setColorAt(index, color);
+  }
+
+  records.forEach((_, index) => updateInstance(index));
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceColor.needsUpdate = true;
+  mesh.renderOrder = 4;
+
   return {
-    back,
-    count: front.count + back.count,
-    front,
-    get flippedCount() {
-      return front.flippedCount + back.flippedCount;
-    },
+    count: records.length,
+    flippedCount: 0,
+    mesh,
+    records,
     reset() {
-      front.reset();
-      back.reset();
+      this.flippedCount = 0;
+
+      records.forEach((record, index) => {
+        record.flipped = false;
+        updateInstance(index);
+      });
+
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.instanceColor.needsUpdate = true;
     },
     brushAt(localPoint, radius, direction) {
-      return (localPoint.z >= 0 ? front : back).brushAt(localPoint, radius, direction);
+      let touched = 0;
+      const strokeAngle = Math.atan2(direction.y, direction.x) + Math.PI * 0.5;
+      const targetFlipped = direction.x + direction.y * 0.16 >= 0;
+      const hinge = targetFlipped ? 1 : -1;
+      const sideRadius = radius * 0.86;
+
+      records.forEach((record, index) => {
+        const distance = record.surfacePoint.distanceTo(localPoint);
+
+        if (distance <= sideRadius) {
+          const seed = seedOffset + index;
+          const edgeFade = 1 - smoothstep(sideRadius * 0.55, sideRadius, distance);
+
+          if (record.flipped !== targetFlipped) {
+            this.flippedCount += targetFlipped ? 1 : -1;
+          }
+
+          record.flipped = targetFlipped;
+          record.hinge = hinge;
+          record.spin = strokeAngle + (seededNoise(seed * 23.9) - 0.5) * 0.18;
+
+          if (targetFlipped) {
+            record.reverseColor.setHSL(
+              0.535 + seededNoise(seed * 8.6) * 0.045,
+              0.43 + seededNoise(seed * 5.9) * 0.13,
+              THREE.MathUtils.clamp(
+                0.45 + edgeFade * 0.085 + (seededNoise(seed * 31.4) - 0.5) * 0.04,
+                0.41,
+                0.57,
+              ),
+            );
+          }
+
+          updateInstance(index);
+          touched += 1;
+        }
+      });
+
+      if (touched > 0) {
+        this.flippedCount = Math.max(0, Math.min(records.length, this.flippedCount));
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
+      }
+
+      return touched;
     },
   };
 }
 
+function createSequinCollection(front, back, side) {
+  return {
+    back,
+    count: front.count + back.count + side.count,
+    front,
+    side,
+    get flippedCount() {
+      return front.flippedCount + back.flippedCount + side.flippedCount;
+    },
+    reset() {
+      front.reset();
+      back.reset();
+      side.reset();
+    },
+    brushAt(localPoint, radius, direction) {
+      return (isSideBrushPoint(localPoint) ? side : localPoint.z >= 0 ? front : back)
+        .brushAt(localPoint, radius, direction);
+    },
+  };
+}
+
+function isSideBrushPoint(localPoint) {
+  const angle = Math.atan2(localPoint.y, localPoint.x);
+  const outline = sampleCushionOutline(angle) * PILLOW_SCALE;
+  const radial = Math.hypot(localPoint.x, localPoint.y) / outline;
+
+  return Math.abs(localPoint.z) < 0.18 || radial > 0.86;
+}
+
 function createPromptGlyph() {
   const group = new THREE.Group();
-  const segments = [
-    [new THREE.Vector2(-0.46, 0.28), new THREE.Vector2(-0.08, 0.02)],
-    [new THREE.Vector2(-0.46, -0.24), new THREE.Vector2(-0.08, 0.02)],
-    [new THREE.Vector2(0.16, -0.3), new THREE.Vector2(0.56, -0.3)],
+  const paths = [
+    {
+      points: createChevronGlyphPath(),
+      radius: 0.048,
+    },
+    {
+      points: [new THREE.Vector2(0.02, -0.285), new THREE.Vector2(0.52, -0.285)],
+      radius: 0.041,
+    },
   ];
 
-  addPromptGlyphSide(group, segments, FRONT_SIDE, false);
-  addPromptGlyphSide(group, segments, -FRONT_SIDE, true);
+  addPromptGlyphSide(group, paths, FRONT_SIDE, false);
+  addPromptGlyphSide(group, paths, -FRONT_SIDE, true);
 
   return group;
 }
 
-function addPromptGlyphSide(group, segments, side, mirrorX) {
-  segments.forEach(([rawStart, rawEnd], index) => {
-    const start = mirrorX ? new THREE.Vector2(-rawStart.x, rawStart.y) : rawStart;
-    const end = mirrorX ? new THREE.Vector2(-rawEnd.x, rawEnd.y) : rawEnd;
-    const foregroundRadius = index === 2 ? 0.032 : 0.039;
+function createChevronGlyphPath() {
+  const top = new THREE.Vector2(-0.5, 0.31);
+  const corner = new THREE.Vector2(-0.075, 0.015);
+  const bottom = new THREE.Vector2(-0.5, -0.28);
+  const topDirection = new THREE.Vector2().subVectors(top, corner).normalize();
+  const bottomDirection = new THREE.Vector2().subVectors(bottom, corner).normalize();
+  const topInner = new THREE.Vector2().copy(corner).addScaledVector(topDirection, 0.116);
+  const bottomInner = new THREE.Vector2().copy(corner).addScaledVector(bottomDirection, 0.116);
+  const points = [];
 
-    group.add(createRaisedGlyphSegment(start, end, foregroundRadius + 0.013, 0.057, glyphShadowMaterial, 4.5, side));
-    group.add(createRaisedGlyphSegment(start, end, foregroundRadius, 0.102, glyphMaterial, 6, side));
+  appendLinePoints(points, top, topInner, 12);
+  appendQuadraticPoints(points, topInner, new THREE.Vector2(-0.012, 0.015), bottomInner, 14);
+  appendLinePoints(points, bottomInner, bottom, 12);
+
+  return points;
+}
+
+function appendLinePoints(points, start, end, steps) {
+  const initialStep = points.length === 0 ? 0 : 1;
+
+  for (let index = initialStep; index <= steps; index += 1) {
+    const t = index / steps;
+
+    points.push(new THREE.Vector2(
+      THREE.MathUtils.lerp(start.x, end.x, t),
+      THREE.MathUtils.lerp(start.y, end.y, t),
+    ));
+  }
+}
+
+function appendQuadraticPoints(points, start, control, end, steps) {
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / steps;
+    const invT = 1 - t;
+
+    points.push(new THREE.Vector2(
+      invT * invT * start.x + 2 * invT * t * control.x + t * t * end.x,
+      invT * invT * start.y + 2 * invT * t * control.y + t * t * end.y,
+    ));
+  }
+}
+
+function addPromptGlyphSide(group, paths, side, mirrorX) {
+  paths.forEach((path) => {
+    const points = path.points.map((point) => (
+      mirrorX ? new THREE.Vector2(-point.x, point.y) : point
+    ));
+    const foregroundRadius = path.radius;
+
+    group.add(createRaisedGlyphPath(points, foregroundRadius + 0.014, 0.057, glyphShadowMaterial, 4.5, side));
+    group.add(createRaisedGlyphPath(points, foregroundRadius, 0.108, glyphMaterial, 6, side));
   });
 }
 
-function createRaisedGlyphSegment(start, end, radius, offset, material, renderOrder, side = FRONT_SIDE) {
+function createRaisedGlyphPath(path, radius, offset, material, renderOrder, side = FRONT_SIDE) {
   const points = [];
-  const steps = 30;
 
-  for (let index = 0; index <= steps; index += 1) {
-    const t = index / steps;
-    const x = THREE.MathUtils.lerp(start.x, end.x, t);
-    const y = THREE.MathUtils.lerp(start.y, end.y, t);
-
-    points.push(cushionSurfacePointFromXY(x, y, side, offset));
-  }
+  path.forEach((point) => {
+    points.push(cushionSurfacePointFromXY(point.x, point.y, side, offset));
+  });
 
   const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
-  const geometry = new THREE.TubeGeometry(curve, 34, radius, 18, false);
+  const geometry = new THREE.TubeGeometry(curve, Math.max(34, points.length * 2), radius, 18, false);
   const mesh = new THREE.Mesh(geometry, material);
 
   mesh.renderOrder = renderOrder;
@@ -839,7 +1062,7 @@ function createSeamMaterial() {
     clearcoat: 0.08,
     color: 0x1a4d7d,
     metalness: 0,
-    opacity: 0.72,
+    opacity: 0.48,
     roughness: 0.84,
     sheen: 1,
     sheenColor: 0x4d8ed2,
