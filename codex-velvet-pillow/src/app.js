@@ -58,8 +58,8 @@ const ICON_OUTLINE_SAMPLES = [
 const PILLOW_SCALE = 1.12;
 const PILLOW_DEPTH_SCALE = 0.44;
 const PILLOW_UV_EXTENT = 1.36;
-const MIN_BRUSH_RADIUS = 0.13;
-const MAX_BRUSH_RADIUS = 0.36;
+const MIN_BRUSH_RADIUS = 0.1;
+const MAX_BRUSH_RADIUS = 0.28;
 const MIN_BRUSH_TRAVEL = 0.018;
 const FRONT_SIDE = 1;
 
@@ -72,7 +72,7 @@ const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
 pillowGroup.rotation.set(-0.08, -0.24, 0.025);
-pillowGroup.position.y = 0.12;
+pillowGroup.position.set(0, -0.12, -0.18);
 scene.add(pillowGroup);
 
 const pillow = createPillow();
@@ -168,8 +168,8 @@ function animate() {
   const elapsed = (now - startTime) / 1000;
   lastFrameTime = now;
 
-  if (!paused && activePointerId === null) {
-    presentationTime += delta;
+  if (!paused) {
+    presentationTime += delta * (activePointerId === null ? 1 : 0.32);
   }
 
   const targetY = -0.24 + presentationTime * 0.46 + pointer.x * 0.1;
@@ -230,7 +230,7 @@ function reverseSequinsFromPointer(event) {
 
   const localPoint = pillow.group.worldToLocal(intersections[0].point.clone());
 
-  if (localPoint.z < 0.02) {
+  if (Math.abs(localPoint.z) < 0.02) {
     hoverFade = 0;
     return;
   }
@@ -290,20 +290,23 @@ function createPillow() {
   const group = new THREE.Group();
   const bodyGeometry = createCushionGeometry();
   const body = new THREE.Mesh(bodyGeometry, fabricMaterial);
-  const frontSeam = createSeamCord(FRONT_SIDE, 0.975, 0.013);
-  const backSeam = createSeamCord(-FRONT_SIDE, 0.975, 0.011);
-  const sequins = createSequinSystem();
+  const frontSeam = createSeamCord(FRONT_SIDE, 0.952, 0.0085);
+  const backSeam = createSeamCord(-FRONT_SIDE, 0.952, 0.008);
+  const frontSequins = createSequinSystem(FRONT_SIDE, 0);
+  const backSequins = createSequinSystem(-FRONT_SIDE, 14000);
+  const sequins = createTwoSidedSequinSystem(frontSequins, backSequins);
   const promptGlyph = createPromptGlyph();
 
   body.frustumCulled = false;
   frontSeam.frustumCulled = false;
   backSeam.frustumCulled = false;
-  sequins.mesh.frustumCulled = false;
+  frontSequins.mesh.frustumCulled = false;
+  backSequins.mesh.frustumCulled = false;
   promptGlyph.traverse((child) => {
     child.frustumCulled = false;
   });
 
-  group.add(body, sequins.mesh, frontSeam, backSeam, promptGlyph);
+  group.add(body, backSequins.mesh, frontSequins.mesh, frontSeam, backSeam, promptGlyph);
 
   return {
     brushTargets: [body],
@@ -372,27 +375,39 @@ function createCushionGeometry() {
 function cushionPointFromDirection(direction, offset = 0) {
   const radius = cushionRadius(direction) + offset;
 
-  return new THREE.Vector3(
+  return applyCouchContact(new THREE.Vector3(
     direction.x * radius,
     direction.y * radius,
     direction.z * radius * PILLOW_DEPTH_SCALE,
-  );
+  ));
 }
 
 function cushionRadius(direction) {
   const planarAmount = Math.hypot(direction.x, direction.y);
   const outline = sampleCushionOutline(Math.atan2(direction.y, direction.x));
-  const contourStrength = Math.pow(THREE.MathUtils.clamp(planarAmount, 0, 1), 0.38);
-  const capRoundness = 0.935 + Math.pow(planarAmount, 1.8) * 0.065;
+  const contourStrength = smoothstep(0.52, 0.98, planarAmount);
+  const capRoundness = 0.952 + Math.pow(planarAmount, 1.8) * 0.048;
   const seamCompression = smoothstep(0.82, 1, planarAmount) * 0.034;
   const clothIrregularity = Math.sin(Math.atan2(direction.y, direction.x) * 5.0 + direction.z * 0.9) * 0.006
     * smoothstep(0.35, 0.92, planarAmount);
 
   return PILLOW_SCALE
-    * THREE.MathUtils.lerp(0.94, outline, contourStrength)
+    * THREE.MathUtils.lerp(0.982, outline, contourStrength)
     * capRoundness
     - seamCompression
     + clothIrregularity;
+}
+
+function applyCouchContact(point) {
+  const contact = smoothstep(0.74 * PILLOW_SCALE, 1.08 * PILLOW_SCALE, -point.y);
+
+  if (contact > 0) {
+    point.y += contact * 0.135;
+    point.z *= 1 - contact * 0.09;
+    point.z -= contact * 0.04;
+  }
+
+  return point;
 }
 
 function cushionSurfacePointFromXY(x, y, side = FRONT_SIDE, offset = 0) {
@@ -407,7 +422,7 @@ function cushionSurfacePointFromXY(x, y, side = FRONT_SIDE, offset = 0) {
     unscaledZ = Math.sqrt(Math.max(0, radius * radius - planarRadius * planarRadius));
   }
 
-  return new THREE.Vector3(x, y, side * unscaledZ * PILLOW_DEPTH_SCALE);
+  return applyCouchContact(new THREE.Vector3(x, y, side * unscaledZ * PILLOW_DEPTH_SCALE));
 }
 
 function cushionNormalFromXY(x, y, side = FRONT_SIDE) {
@@ -456,7 +471,7 @@ function createSeamCord(side, inset, radius) {
   return mesh;
 }
 
-function createSequinSystem() {
+function createSequinSystem(side = FRONT_SIDE, seedOffset = 0) {
   const records = [];
   const spacing = 0.052;
   const rowStep = spacing * 0.76;
@@ -475,11 +490,12 @@ function createSequinSystem() {
         continue;
       }
 
-      const jitterX = (seededNoise(records.length * 9.7) - 0.5) * spacing * 0.18;
-      const jitterY = (seededNoise(records.length * 13.1) - 0.5) * spacing * 0.18;
+      const seed = seedOffset + records.length;
+      const jitterX = (seededNoise(seed * 9.7) - 0.5) * spacing * 0.18;
+      const jitterY = (seededNoise(seed * 13.1) - 0.5) * spacing * 0.18;
       const px = x + jitterX;
       const py = y + jitterY;
-      const surface = cushionNormalFromXY(px, py, FRONT_SIDE);
+      const surface = cushionNormalFromXY(px, py, side);
       const tangent = new THREE.Vector3(1, 0, 0).projectOnVector(surface.normal).lengthSq() > 0.96
         ? new THREE.Vector3(0, 1, 0)
         : new THREE.Vector3(1, 0, 0);
@@ -487,31 +503,31 @@ function createSequinSystem() {
       tangent.projectOnPlane(surface.normal).normalize();
 
       const bitangent = new THREE.Vector3().crossVectors(surface.normal, tangent).normalize();
-      const baseHue = 0.595 + seededNoise(records.length * 4.2) * 0.045;
+      const baseHue = 0.595 + seededNoise(seed * 4.2) * 0.045;
       const frontColor = new THREE.Color().setHSL(
         baseHue,
         0.86,
-        0.34 + seededNoise(records.length * 6.3) * 0.16,
+        0.34 + seededNoise(seed * 6.3) * 0.16,
       );
       const reverseColor = new THREE.Color().setHSL(
-        0.515 + seededNoise(records.length * 8.6) * 0.035,
-        0.22,
-        0.82 + seededNoise(records.length * 7.1) * 0.1,
+        0.535 + seededNoise(seed * 8.6) * 0.045,
+        0.44 + seededNoise(seed * 5.9) * 0.14,
+        0.48 + seededNoise(seed * 7.1) * 0.12,
       );
 
       records.push({
         bitangent,
         flipped: false,
         frontColor,
-        hinge: seededNoise(records.length * 3.8) > 0.5 ? 1 : -1,
+        hinge: seededNoise(seed * 3.8) > 0.5 ? 1 : -1,
         normal: surface.normal,
-        phase: seededNoise(records.length * 11.7) * Math.PI * 2,
-        position: surface.point.addScaledVector(surface.normal, 0.052 + seededNoise(records.length * 15.2) * 0.004),
-        radius: spacing * (0.58 + seededNoise(records.length * 2.9) * 0.07),
+        phase: seededNoise(seed * 11.7) * Math.PI * 2,
+        position: surface.point.addScaledVector(surface.normal, 0.052 + seededNoise(seed * 15.2) * 0.004),
+        radius: spacing * (0.58 + seededNoise(seed * 2.9) * 0.07),
         reverseColor,
-        scaleX: 0.95 + seededNoise(records.length * 18.8) * 0.12,
-        scaleY: 0.9 + seededNoise(records.length * 21.6) * 0.16,
-        spin: seededNoise(records.length * 5.4) * Math.PI * 2,
+        scaleX: 0.95 + seededNoise(seed * 18.8) * 0.12,
+        scaleY: 0.9 + seededNoise(seed * 21.6) * 0.16,
+        spin: seededNoise(seed * 5.4) * Math.PI * 2,
         tangent,
         x: px,
         y: py,
@@ -529,19 +545,20 @@ function createSequinSystem() {
   const qBase = new THREE.Quaternion();
   const qSpin = new THREE.Quaternion();
   const qTilt = new THREE.Quaternion();
+  const tiltAxis = new THREE.Vector3(1, 0, 0);
 
   function updateInstance(index) {
     const record = records[index];
     const tilt = record.flipped
-      ? record.hinge * (0.46 + seededNoise(index * 12.5) * 0.18)
-      : record.hinge * (-0.05 + seededNoise(index * 10.4) * 0.08);
+      ? record.hinge * (0.35 + seededNoise((seedOffset + index) * 12.5) * 0.12)
+      : record.hinge * (-0.05 + seededNoise((seedOffset + index) * 10.4) * 0.08);
 
     qBase.setFromUnitVectors(zAxis, record.normal);
     qSpin.setFromAxisAngle(zAxis, record.spin);
-    qTilt.setFromAxisAngle(new THREE.Vector3(1, 0, 0), tilt);
+    qTilt.setFromAxisAngle(tiltAxis, tilt);
 
     dummy.position.copy(record.position);
-    dummy.position.addScaledVector(record.normal, record.flipped ? 0.018 : 0);
+    dummy.position.addScaledVector(record.normal, record.flipped ? 0.012 : 0);
     dummy.quaternion.copy(qBase).multiply(qSpin).multiply(qTilt);
     dummy.scale.set(record.radius * record.scaleX, record.radius * record.scaleY, record.radius);
     dummy.updateMatrix();
@@ -579,18 +596,44 @@ function createSequinSystem() {
       const strokeAngle = Math.atan2(direction.y, direction.x) + Math.PI * 0.5;
       const targetFlipped = direction.x + direction.y * 0.16 >= 0;
       const hinge = targetFlipped ? 1 : -1;
+      const alongScale = 1.55;
+      const crossScale = 0.68;
 
       records.forEach((record, index) => {
-        const distance = Math.hypot(record.x - localPoint.x, record.y - localPoint.y);
+        const deltaX = record.x - localPoint.x;
+        const deltaY = record.y - localPoint.y;
+        const along = deltaX * direction.x + deltaY * direction.y;
+        const cross = deltaX * -direction.y + deltaY * direction.x;
+        const effectiveDistance = Math.hypot(along / alongScale, cross / crossScale);
 
-        if (distance <= radius) {
+        if (effectiveDistance <= radius) {
+          const edgeFade = 1 - smoothstep(radius * 0.58, radius, effectiveDistance);
+
           if (record.flipped !== targetFlipped) {
             this.flippedCount += targetFlipped ? 1 : -1;
           }
 
           record.flipped = targetFlipped;
           record.hinge = hinge;
-          record.spin = strokeAngle + (seededNoise(index * 23.9) - 0.5) * 0.18;
+          record.spin = strokeAngle + (seededNoise((seedOffset + index) * 23.9) - 0.5) * 0.18;
+
+          if (targetFlipped) {
+            const seed = seedOffset + index;
+            const sweep = along / radius;
+            const lane = 1 - THREE.MathUtils.clamp(Math.abs(cross) / (radius * crossScale), 0, 1);
+            const napLight = THREE.MathUtils.clamp(
+              0.47 + sweep * 0.045 + lane * edgeFade * 0.065 + (seededNoise(seed * 31.4) - 0.5) * 0.045,
+              0.42,
+              0.59,
+            );
+
+            record.reverseColor.setHSL(
+              0.535 + seededNoise(seed * 8.6) * 0.045,
+              0.43 + seededNoise(seed * 5.9) * 0.13,
+              napLight,
+            );
+          }
+
           updateInstance(index);
           touched += 1;
         }
@@ -607,6 +650,24 @@ function createSequinSystem() {
   };
 }
 
+function createTwoSidedSequinSystem(front, back) {
+  return {
+    back,
+    count: front.count + back.count,
+    front,
+    get flippedCount() {
+      return front.flippedCount + back.flippedCount;
+    },
+    reset() {
+      front.reset();
+      back.reset();
+    },
+    brushAt(localPoint, radius, direction) {
+      return (localPoint.z >= 0 ? front : back).brushAt(localPoint, radius, direction);
+    },
+  };
+}
+
 function createPromptGlyph() {
   const group = new THREE.Group();
   const segments = [
@@ -615,17 +676,24 @@ function createPromptGlyph() {
     [new THREE.Vector2(0.16, -0.3), new THREE.Vector2(0.56, -0.3)],
   ];
 
-  segments.forEach(([start, end], index) => {
-    const foregroundRadius = index === 2 ? 0.037 : 0.044;
-
-    group.add(createRaisedGlyphSegment(start, end, foregroundRadius + 0.012, 0.074, glyphShadowMaterial, 4.5));
-    group.add(createRaisedGlyphSegment(start, end, foregroundRadius, 0.132, glyphMaterial, 6));
-  });
+  addPromptGlyphSide(group, segments, FRONT_SIDE, false);
+  addPromptGlyphSide(group, segments, -FRONT_SIDE, true);
 
   return group;
 }
 
-function createRaisedGlyphSegment(start, end, radius, offset, material, renderOrder) {
+function addPromptGlyphSide(group, segments, side, mirrorX) {
+  segments.forEach(([rawStart, rawEnd], index) => {
+    const start = mirrorX ? new THREE.Vector2(-rawStart.x, rawStart.y) : rawStart;
+    const end = mirrorX ? new THREE.Vector2(-rawEnd.x, rawEnd.y) : rawEnd;
+    const foregroundRadius = index === 2 ? 0.032 : 0.039;
+
+    group.add(createRaisedGlyphSegment(start, end, foregroundRadius + 0.013, 0.057, glyphShadowMaterial, 4.5, side));
+    group.add(createRaisedGlyphSegment(start, end, foregroundRadius, 0.102, glyphMaterial, 6, side));
+  });
+}
+
+function createRaisedGlyphSegment(start, end, radius, offset, material, renderOrder, side = FRONT_SIDE) {
   const points = [];
   const steps = 30;
 
@@ -634,7 +702,7 @@ function createRaisedGlyphSegment(start, end, radius, offset, material, renderOr
     const x = THREE.MathUtils.lerp(start.x, end.x, t);
     const y = THREE.MathUtils.lerp(start.y, end.y, t);
 
-    points.push(cushionSurfacePointFromXY(x, y, FRONT_SIDE, offset));
+    points.push(cushionSurfacePointFromXY(x, y, side, offset));
   }
 
   const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
@@ -769,12 +837,14 @@ function createFabricMaterial() {
 function createSeamMaterial() {
   return new THREE.MeshPhysicalMaterial({
     clearcoat: 0.08,
-    color: 0x153e73,
+    color: 0x1a4d7d,
     metalness: 0,
-    roughness: 0.78,
+    opacity: 0.72,
+    roughness: 0.84,
     sheen: 1,
     sheenColor: 0x4d8ed2,
-    sheenRoughness: 0.86,
+    sheenRoughness: 0.92,
+    transparent: true,
   });
 }
 
@@ -856,14 +926,14 @@ function createSequinMaterial() {
 
 function createGlyphMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    clearcoat: 0.72,
-    clearcoatRoughness: 0.16,
-    color: 0xe8fbff,
+    clearcoat: 0.42,
+    clearcoatRoughness: 0.28,
+    color: 0xd7f4fb,
     emissive: 0x174f72,
-    emissiveIntensity: 0.28,
-    metalness: 0.12,
-    reflectivity: 0.56,
-    roughness: 0.26,
+    emissiveIntensity: 0.18,
+    metalness: 0.04,
+    reflectivity: 0.36,
+    roughness: 0.42,
   });
 }
 
@@ -882,10 +952,10 @@ function createGlyphShadowMaterial() {
 function createCouch() {
   const group = new THREE.Group();
   const couchMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x202938,
+    color: 0x2b3443,
     roughness: 0.82,
     sheen: 1,
-    sheenColor: 0x6b6470,
+    sheenColor: 0x7a7480,
     sheenRoughness: 0.7,
   });
   const backMaterial = couchMaterial.clone();
@@ -898,7 +968,16 @@ function createCouch() {
       color: 0x000000,
       depthWrite: false,
       map: shadowTexture,
-      opacity: 0.34,
+      opacity: 0.52,
+      transparent: true,
+    }),
+  );
+  const contactShadow = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      color: 0x000000,
+      depthWrite: false,
+      map: shadowTexture,
+      opacity: 0.5,
       transparent: true,
     }),
   );
@@ -909,10 +988,12 @@ function createCouch() {
   back.rotation.x = 0.08;
   leftArm.position.set(-3.08, -0.92, -0.7);
   rightArm.position.set(3.08, -0.92, -0.7);
-  shadow.position.set(0, -1.05, 0.16);
-  shadow.scale.set(2.85, 0.72, 1);
+  shadow.position.set(0, -1.02, 0.16);
+  shadow.scale.set(3.16, 0.86, 1);
+  contactShadow.position.set(0, -0.98, 0.38);
+  contactShadow.scale.set(2.15, 0.42, 1);
 
-  group.add(back, seat, leftArm, rightArm, shadow);
+  group.add(back, seat, leftArm, rightArm, shadow, contactShadow);
 
   return group;
 }
