@@ -172,14 +172,16 @@ function animate() {
   const elapsed = (now - startTime) / 1000;
   lastFrameTime = now;
 
-  if (!paused) {
-    presentationTime += delta * (activePointerId === null ? 1 : 0.32);
+  if (!paused && activePointerId === null) {
+    presentationTime += delta;
   }
 
   const targetY = -0.24 + presentationTime * 0.46 + pointer.x * 0.1;
 
   pillowGroup.rotation.x += (-0.07 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.04;
-  pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
+  if (activePointerId === null) {
+    pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
+  }
   pillowGroup.rotation.z += ((0.025 + pointer.x * 0.018) - pillowGroup.rotation.z) * 0.03;
   pillow.group.position.y = Math.sin(presentationTime * 0.82) * 0.018;
 
