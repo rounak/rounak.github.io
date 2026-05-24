@@ -923,6 +923,7 @@ function addPromptGlyphSide(group, paths, side, mirrorX) {
 
 function createRaisedGlyphPath(path, radius, offset, material, renderOrder, side = FRONT_SIDE) {
   const points = [];
+  const group = new THREE.Group();
 
   path.forEach((point) => {
     points.push(cushionSurfacePointFromXY(point.x, point.y, side, offset));
@@ -932,6 +933,19 @@ function createRaisedGlyphPath(path, radius, offset, material, renderOrder, side
   const geometry = new THREE.TubeGeometry(curve, Math.max(34, points.length * 2), radius, 18, false);
   const mesh = new THREE.Mesh(geometry, material);
 
+  mesh.renderOrder = renderOrder;
+  group.add(mesh);
+  group.add(createGlyphEndCap(points[0], radius, material, renderOrder));
+  group.add(createGlyphEndCap(points[points.length - 1], radius, material, renderOrder));
+
+  return group;
+}
+
+function createGlyphEndCap(position, radius, material, renderOrder) {
+  const geometry = new THREE.SphereGeometry(radius * 1.01, 18, 12);
+  const mesh = new THREE.Mesh(geometry, material);
+
+  mesh.position.copy(position);
   mesh.renderOrder = renderOrder;
 
   return mesh;
