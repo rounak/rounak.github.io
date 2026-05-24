@@ -653,8 +653,8 @@ function createSequinSystem(side = FRONT_SIDE, seedOffset = 0) {
 
 function createSideSequinSystem(seedOffset = 0) {
   const records = [];
-  const depthRowCount = 13;
-  const angleCount = 216;
+  const depthRowCount = 23;
+  const angleCount = 240;
   const spacing = 0.052;
 
   for (let row = 0; row < depthRowCount; row += 1) {
@@ -663,8 +663,8 @@ function createSideSequinSystem(seedOffset = 0) {
     for (let index = 0; index < angleCount; index += 1) {
       const seed = seedOffset + records.length;
       const angle = ((index + (row % 2) * 0.5) / angleCount) * Math.PI * 2;
-      const jitterAngle = (seededNoise(seed * 12.4) - 0.5) * 0.014;
-      const jitterDepth = (seededNoise(seed * 7.8) - 0.5) * 0.038;
+      const jitterAngle = (seededNoise(seed * 12.4) - 0.5) * 0.018;
+      const jitterDepth = (seededNoise(seed * 7.8) - 0.5) * 0.028;
       const sideAngle = angle + jitterAngle;
       const sideDepth = depth + jitterDepth;
       const direction = new THREE.Vector3(
@@ -701,11 +701,11 @@ function createSideSequinSystem(seedOffset = 0) {
         hinge: seededNoise(seed * 3.8) > 0.5 ? 1 : -1,
         normal,
         phase: seededNoise(seed * 11.7) * Math.PI * 2,
-        position: surfacePoint.clone().addScaledVector(normal, 0.057 + seededNoise(seed * 15.2) * 0.004),
-        radius: spacing * (0.66 + seededNoise(seed * 2.9) * 0.08),
+        position: surfacePoint.clone().addScaledVector(normal, 0.061 + seededNoise(seed * 15.2) * 0.004),
+        radius: spacing * (0.76 + seededNoise(seed * 2.9) * 0.08),
         reverseColor,
-        scaleX: 0.96 + seededNoise(seed * 18.8) * 0.12,
-        scaleY: 0.92 + seededNoise(seed * 21.6) * 0.14,
+        scaleX: 1.02 + seededNoise(seed * 18.8) * 0.12,
+        scaleY: 0.98 + seededNoise(seed * 21.6) * 0.14,
         spin: seededNoise(seed * 5.4) * Math.PI * 2,
         surfacePoint,
         tangent,
