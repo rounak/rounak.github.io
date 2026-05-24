@@ -916,7 +916,7 @@ function addPromptGlyphSide(group, paths, side, mirrorX) {
     ));
     const foregroundRadius = path.radius;
 
-    group.add(createRaisedGlyphPath(points, foregroundRadius + 0.018, 0.057, glyphShadowMaterial, 4.5, side));
+    group.add(createRaisedGlyphPath(points, foregroundRadius + 0.007, 0.078, glyphShadowMaterial, 4.5, side));
     group.add(createRaisedGlyphPath(points, foregroundRadius, 0.11, glyphMaterial, 6, side));
   });
 }
@@ -1176,13 +1176,15 @@ function createGlyphMaterial() {
 
 function createGlyphShadowMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    clearcoat: 0.18,
-    clearcoatRoughness: 0.5,
-    color: 0x08244e,
-    emissive: 0x020914,
-    emissiveIntensity: 0.08,
+    clearcoat: 0.12,
+    clearcoatRoughness: 0.58,
+    color: 0x1d6798,
+    emissive: 0x08243d,
+    emissiveIntensity: 0.12,
     metalness: 0,
-    roughness: 0.62,
+    opacity: 0.68,
+    roughness: 0.72,
+    transparent: true,
   });
 }
 
