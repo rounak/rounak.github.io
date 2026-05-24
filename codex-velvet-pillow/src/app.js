@@ -853,11 +853,11 @@ function createPromptGlyph() {
   const paths = [
     {
       points: createChevronGlyphPath(),
-      radius: 0.048,
+      radius: 0.064,
     },
     {
       points: [new THREE.Vector2(0.02, -0.285), new THREE.Vector2(0.52, -0.285)],
-      radius: 0.041,
+      radius: 0.056,
     },
   ];
 
@@ -916,8 +916,8 @@ function addPromptGlyphSide(group, paths, side, mirrorX) {
     ));
     const foregroundRadius = path.radius;
 
-    group.add(createRaisedGlyphPath(points, foregroundRadius + 0.014, 0.057, glyphShadowMaterial, 4.5, side));
-    group.add(createRaisedGlyphPath(points, foregroundRadius, 0.108, glyphMaterial, 6, side));
+    group.add(createRaisedGlyphPath(points, foregroundRadius + 0.018, 0.057, glyphShadowMaterial, 4.5, side));
+    group.add(createRaisedGlyphPath(points, foregroundRadius, 0.11, glyphMaterial, 6, side));
   });
 }
 
