@@ -67,6 +67,7 @@ const fabricMaterial = createFabricMaterial();
 const seamMaterial = createSeamMaterial();
 const sequinMaterial = createSequinMaterial();
 const glyphMaterial = createGlyphMaterial();
+const glyphShadowMaterial = createGlyphShadowMaterial();
 const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
@@ -171,8 +172,7 @@ function animate() {
     presentationTime += delta;
   }
 
-  const frontBiasedTurn = -0.22 + Math.sin(presentationTime * 0.58) * 0.34;
-  const targetY = frontBiasedTurn + pointer.x * 0.1;
+  const targetY = -0.24 + presentationTime * 0.46 + pointer.x * 0.1;
 
   pillowGroup.rotation.x += (-0.07 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.04;
   pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
@@ -181,6 +181,7 @@ function animate() {
 
   fabricMaterial.uniforms.time.value = elapsed;
   fabricMaterial.uniforms.hover.value += (hoverFade - fabricMaterial.uniforms.hover.value) * 0.08;
+  sequinMaterial.uniforms.time.value = elapsed;
   updateLights(elapsed);
   updateGlowShards(elapsed);
   ambientDust.rotation.y = elapsed * 0.008;
@@ -457,20 +458,20 @@ function createSeamCord(side, inset, radius) {
 
 function createSequinSystem() {
   const records = [];
-  const spacing = 0.066;
-  const rowStep = spacing * 0.86;
+  const spacing = 0.052;
+  const rowStep = spacing * 0.76;
   let row = 0;
 
-  for (let y = -1.04; y <= 1.04; y += rowStep) {
-    const xOffset = row % 2 === 0 ? 0 : spacing * 0.5;
+  for (let y = -1.05; y <= 1.05; y += rowStep) {
+    const xOffset = row % 2 === 0 ? 0 : spacing * 0.48;
 
-    for (let x = -1.17 + xOffset; x <= 1.17; x += spacing) {
+    for (let x = -1.18 + xOffset; x <= 1.18; x += spacing) {
       const angle = Math.atan2(y, x);
       const distance = Math.hypot(x, y);
       const outline = sampleCushionOutline(angle) * PILLOW_SCALE;
       const radial = distance / outline;
 
-      if (radial < 0.03 || distance + spacing * 0.66 > outline * 0.93) {
+      if (radial < 0.03 || distance + spacing * 0.66 > outline * 0.935) {
         continue;
       }
 
@@ -489,13 +490,13 @@ function createSequinSystem() {
       const baseHue = 0.595 + seededNoise(records.length * 4.2) * 0.045;
       const frontColor = new THREE.Color().setHSL(
         baseHue,
-        0.92,
-        0.43 + seededNoise(records.length * 6.3) * 0.14,
+        0.86,
+        0.34 + seededNoise(records.length * 6.3) * 0.16,
       );
       const reverseColor = new THREE.Color().setHSL(
-        0.49 + seededNoise(records.length * 8.6) * 0.05,
-        0.38,
-        0.84 + seededNoise(records.length * 7.1) * 0.12,
+        0.515 + seededNoise(records.length * 8.6) * 0.035,
+        0.22,
+        0.82 + seededNoise(records.length * 7.1) * 0.1,
       );
 
       records.push({
@@ -505,9 +506,11 @@ function createSequinSystem() {
         hinge: seededNoise(records.length * 3.8) > 0.5 ? 1 : -1,
         normal: surface.normal,
         phase: seededNoise(records.length * 11.7) * Math.PI * 2,
-        position: surface.point.addScaledVector(surface.normal, 0.044),
-        radius: spacing * (0.55 + seededNoise(records.length * 2.9) * 0.08),
+        position: surface.point.addScaledVector(surface.normal, 0.052 + seededNoise(records.length * 15.2) * 0.004),
+        radius: spacing * (0.58 + seededNoise(records.length * 2.9) * 0.07),
         reverseColor,
+        scaleX: 0.95 + seededNoise(records.length * 18.8) * 0.12,
+        scaleY: 0.9 + seededNoise(records.length * 21.6) * 0.16,
         spin: seededNoise(records.length * 5.4) * Math.PI * 2,
         tangent,
         x: px,
@@ -518,7 +521,7 @@ function createSequinSystem() {
     row += 1;
   }
 
-  const geometry = new THREE.CircleGeometry(1, 14);
+  const geometry = createSequinGeometry();
   const mesh = new THREE.InstancedMesh(geometry, sequinMaterial, records.length);
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
@@ -540,7 +543,7 @@ function createSequinSystem() {
     dummy.position.copy(record.position);
     dummy.position.addScaledVector(record.normal, record.flipped ? 0.018 : 0);
     dummy.quaternion.copy(qBase).multiply(qSpin).multiply(qTilt);
-    dummy.scale.setScalar(record.radius);
+    dummy.scale.set(record.radius * record.scaleX, record.radius * record.scaleY, record.radius);
     dummy.updateMatrix();
     mesh.setMatrixAt(index, dummy.matrix);
 
@@ -613,13 +616,16 @@ function createPromptGlyph() {
   ];
 
   segments.forEach(([start, end], index) => {
-    group.add(createRaisedGlyphSegment(start, end, index === 2 ? 0.021 : 0.026));
+    const foregroundRadius = index === 2 ? 0.037 : 0.044;
+
+    group.add(createRaisedGlyphSegment(start, end, foregroundRadius + 0.012, 0.074, glyphShadowMaterial, 4.5));
+    group.add(createRaisedGlyphSegment(start, end, foregroundRadius, 0.132, glyphMaterial, 6));
   });
 
   return group;
 }
 
-function createRaisedGlyphSegment(start, end, radius) {
+function createRaisedGlyphSegment(start, end, radius, offset, material, renderOrder) {
   const points = [];
   const steps = 30;
 
@@ -628,23 +634,74 @@ function createRaisedGlyphSegment(start, end, radius) {
     const x = THREE.MathUtils.lerp(start.x, end.x, t);
     const y = THREE.MathUtils.lerp(start.y, end.y, t);
 
-    points.push(cushionSurfacePointFromXY(x, y, FRONT_SIDE, 0.086));
+    points.push(cushionSurfacePointFromXY(x, y, FRONT_SIDE, offset));
   }
 
   const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
-  const geometry = new THREE.TubeGeometry(curve, 34, radius, 14, false);
-  const mesh = new THREE.Mesh(geometry, glyphMaterial);
+  const geometry = new THREE.TubeGeometry(curve, 34, radius, 18, false);
+  const mesh = new THREE.Mesh(geometry, material);
 
-  mesh.renderOrder = 5;
+  mesh.renderOrder = renderOrder;
 
   return mesh;
+}
+
+function createSequinGeometry() {
+  const segments = 22;
+  const rings = [
+    { radius: 0, z: -0.026 },
+    { radius: 0.34, z: -0.014 },
+    { radius: 0.72, z: 0.01 },
+    { radius: 1, z: -0.006 },
+  ];
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  rings.forEach((ring) => {
+    for (let segment = 0; segment < segments; segment += 1) {
+      const angle = segment / segments * Math.PI * 2;
+      const ripple = 1
+        + Math.sin(angle * 3.0) * 0.012
+        + Math.cos(angle * 5.0) * 0.008;
+      const x = Math.cos(angle) * ring.radius * ripple;
+      const y = Math.sin(angle) * ring.radius * ripple;
+
+      positions.push(x, y, ring.z);
+      normals.push(0, -ring.z * 8 + 0.05, 1);
+    }
+  });
+
+  for (let ring = 0; ring < rings.length - 1; ring += 1) {
+    const current = ring * segments;
+    const next = (ring + 1) * segments;
+
+    for (let segment = 0; segment < segments; segment += 1) {
+      const a = current + segment;
+      const b = current + (segment + 1) % segments;
+      const c = next + segment;
+      const d = next + (segment + 1) % segments;
+
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+
+  geometry.setIndex(indices);
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+
+  return geometry;
 }
 
 function createFabricMaterial() {
   return new THREE.ShaderMaterial({
     uniforms: {
       baseColor: { value: new THREE.Color(0x122d62) },
-      deepColor: { value: new THREE.Color(0x070d22) },
+      deepColor: { value: new THREE.Color(0x091a3a) },
       hover: { value: 0 },
       lightA: { value: new THREE.Vector3(-3.2, 2.4, 3.7) },
       lightB: { value: new THREE.Vector3(2.7, 1.2, 2.7) },
@@ -696,7 +753,7 @@ function createFabricMaterial() {
         float diffuse = clamp01(dot(normal, lightDirectionA) * 0.45 + 0.55);
         float fill = clamp01(dot(normal, lightDirectionB) * 0.5 + 0.5);
         float rim = pow(1.0 - clamp01(dot(normal, viewDirection)), 2.4);
-        vec3 color = mix(deepColor, baseColor, 0.46 + diffuse * 0.32 + fill * 0.16 + woven);
+        vec3 color = mix(deepColor, baseColor, 0.54 + diffuse * 0.34 + fill * 0.2 + woven);
 
         color = mix(color, warmColor, 0.05 + rim * 0.08);
         color *= 1.0 - vEdgePressure * 0.24;
@@ -724,6 +781,10 @@ function createSeamMaterial() {
 function createSequinMaterial() {
   return new THREE.ShaderMaterial({
     fragmentShader: `
+      uniform vec3 lightA;
+      uniform vec3 lightB;
+      uniform float time;
+
       varying vec3 vColor;
       varying vec2 vDiskUv;
       varying vec3 vWorldNormal;
@@ -736,18 +797,30 @@ function createSequinMaterial() {
       void main() {
         vec3 normal = normalize(vWorldNormal);
         vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        vec3 lightDirectionA = normalize(lightA - vWorldPosition);
+        vec3 lightDirectionB = normalize(lightB - vWorldPosition);
+        vec3 halfA = normalize(lightDirectionA + viewDirection);
+        vec3 halfB = normalize(lightDirectionB + viewDirection);
         float facing = sat(dot(normal, viewDirection));
         float radius = length(vDiskUv);
-        float bevel = smoothstep(0.70, 0.99, radius);
-        float crescent = smoothstep(0.12, 0.0, abs(vDiskUv.y - 0.22))
-          * smoothstep(0.78, 0.18, abs(vDiskUv.x + 0.12));
-        float crossSheen = sin((vDiskUv.x * 9.0 + vDiskUv.y * 6.0) + vWorldPosition.x * 3.0) * 0.045;
-        float rim = pow(1.0 - facing, 2.0);
-        vec3 color = vColor * (1.02 + facing * 0.2 + crossSheen);
+        float bevel = smoothstep(0.72, 0.99, radius);
+        float pin = 1.0 - smoothstep(0.05, 0.16, radius);
+        float hingeShadow = smoothstep(0.48, 0.9, vDiskUv.y) * smoothstep(1.02, 0.72, radius);
+        float lowerLip = smoothstep(-0.82, -0.54, vDiskUv.y) * smoothstep(0.96, 0.64, radius);
+        float diffuseA = sat(dot(normal, lightDirectionA));
+        float diffuseB = sat(dot(normal, lightDirectionB));
+        float specA = pow(sat(dot(normal, halfA)), 34.0);
+        float specB = pow(sat(dot(normal, halfB)), 54.0);
+        float crescent = smoothstep(0.1, 0.0, abs(vDiskUv.y - 0.26))
+          * smoothstep(0.82, 0.2, abs(vDiskUv.x + 0.14));
+        float crossSheen = sin((vDiskUv.x * 12.0 + vDiskUv.y * 7.0) + vWorldPosition.x * 4.0) * 0.035;
+        float rim = pow(1.0 - facing, 1.9);
+        vec3 color = vColor * (0.48 + diffuseA * 0.62 + diffuseB * 0.22 + facing * 0.12 + crossSheen);
 
-        color += vec3(0.32, 0.68, 1.0) * crescent * 0.28;
-        color += vec3(0.18, 0.44, 0.86) * rim * 0.14;
-        color *= 1.0 - bevel * 0.12;
+        color += vec3(0.75, 0.95, 1.0) * (specA * 0.8 + specB * 0.42 + crescent * 0.18);
+        color += vec3(0.16, 0.43, 0.9) * rim * 0.18;
+        color *= 1.0 - bevel * 0.16 - pin * 0.32 - hingeShadow * 0.16 - lowerLip * 0.1;
+        color += vec3(0.02, 0.045, 0.09) * pin;
 
         gl_FragColor = vec4(color, 1.0);
       }
@@ -756,6 +829,11 @@ function createSequinMaterial() {
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
     side: THREE.DoubleSide,
+    uniforms: {
+      lightA: { value: new THREE.Vector3(-3.2, 2.4, 3.7) },
+      lightB: { value: new THREE.Vector3(2.7, 1.2, 2.7) },
+      time: { value: 0 },
+    },
     vertexShader: `
       varying vec3 vColor;
       varying vec2 vDiskUv;
@@ -778,14 +856,26 @@ function createSequinMaterial() {
 
 function createGlyphMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    clearcoat: 0.62,
-    clearcoatRoughness: 0.2,
-    color: 0xd8f9ff,
-    emissive: 0x12354c,
-    emissiveIntensity: 0.2,
-    metalness: 0.04,
-    reflectivity: 0.46,
-    roughness: 0.34,
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.16,
+    color: 0xe8fbff,
+    emissive: 0x174f72,
+    emissiveIntensity: 0.28,
+    metalness: 0.12,
+    reflectivity: 0.56,
+    roughness: 0.26,
+  });
+}
+
+function createGlyphShadowMaterial() {
+  return new THREE.MeshPhysicalMaterial({
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.5,
+    color: 0x08244e,
+    emissive: 0x020914,
+    emissiveIntensity: 0.08,
+    metalness: 0,
+    roughness: 0.62,
   });
 }
 
@@ -857,6 +947,8 @@ function updateLights(elapsed) {
 
   fabricMaterial.uniforms.lightA.value.copy(lightRig[0].light.position);
   fabricMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
+  sequinMaterial.uniforms.lightA.value.copy(lightRig[0].light.position);
+  sequinMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
 }
 
 function createAmbientDust() {
