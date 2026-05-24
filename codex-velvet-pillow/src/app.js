@@ -63,6 +63,7 @@ const napTexture = createNapTexture();
 const noiseTexture = createNoiseTexture();
 const velvetMaterial = createVelvetMaterial(napTexture, noiseTexture);
 const cordMaterial = createCordMaterial(napTexture, noiseTexture);
+const glyphMaterial = createGlyphMaterial();
 const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
@@ -91,6 +92,7 @@ let lastFrameTime = performance.now();
 let lastBrushPoint = null;
 let activePointerId = null;
 let hoverFade = 0;
+let spinAngle = -0.38;
 
 toggleButton.addEventListener("click", () => {
   paused = !paused;
@@ -156,9 +158,11 @@ function animate() {
   lastFrameTime = now;
 
   const motion = paused ? 0 : 1;
-  const targetY = -0.38 + pointer.x * 0.12;
+  spinAngle += delta * 0.52 * motion;
+
+  const targetY = spinAngle + pointer.x * 0.16;
   pillowGroup.rotation.x += (-0.08 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.035;
-  pillowGroup.rotation.y += ((targetY + Math.sin(elapsed * 0.23) * 0.055) - pillowGroup.rotation.y) * 0.018;
+  pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
   pillowGroup.rotation.z += ((0.035 + pointer.x * 0.018) - pillowGroup.rotation.z) * 0.026;
 
   if (motion) {
@@ -251,14 +255,18 @@ function createPillow() {
   const side = new THREE.Mesh(sideGeometry, velvetMaterial);
   const frontPipe = createPiping(1, 1.012, 0.042, cordMaterial);
   const backPipe = createPiping(-1, 1.012, 0.038, cordMaterial);
+  const promptGlyph = createPromptGlyph();
 
   front.frustumCulled = false;
   back.frustumCulled = false;
   side.frustumCulled = false;
   frontPipe.frustumCulled = false;
   backPipe.frustumCulled = false;
+  promptGlyph.traverse((child) => {
+    child.frustumCulled = false;
+  });
 
-  group.add(back, side, front, frontPipe, backPipe);
+  group.add(back, side, front, frontPipe, backPipe, promptGlyph);
 
   return {
     brushTargets: [front, back],
@@ -441,6 +449,68 @@ function createPiping(side, inset, radius, material) {
   return new THREE.Mesh(geometry, material);
 }
 
+function createPromptGlyph() {
+  const group = new THREE.Group();
+  const segments = [
+    [new THREE.Vector2(-0.5, 0.3), new THREE.Vector2(-0.08, 0.02)],
+    [new THREE.Vector2(-0.5, -0.26), new THREE.Vector2(-0.08, 0.02)],
+    [new THREE.Vector2(0.16, -0.3), new THREE.Vector2(0.62, -0.3)],
+  ];
+
+  [-1, 1].forEach((side) => {
+    segments.forEach(([start, end], index) => {
+      const radius = index === 2 ? 0.03 : 0.035;
+      group.add(createRaisedGlyphSegment(start, end, side, radius));
+    });
+  });
+
+  return group;
+}
+
+function createRaisedGlyphSegment(start, end, side, radius) {
+  const points = [];
+  const steps = 28;
+
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    const x = THREE.MathUtils.lerp(start.x, end.x, t);
+    const y = THREE.MathUtils.lerp(start.y, end.y, t);
+
+    points.push(pillowSurfacePointFromXY(x, y, side, 0.078));
+  }
+
+  const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.12);
+  const geometry = new THREE.TubeGeometry(curve, 36, radius, 18, false);
+  const mesh = new THREE.Mesh(geometry, glyphMaterial);
+
+  mesh.renderOrder = 3;
+
+  return mesh;
+}
+
+function pillowSurfacePointFromXY(x, y, side, offset = 0) {
+  const angle = Math.atan2(y, x);
+  const distance = Math.hypot(x, y);
+  const outline = sampleIconOutline(angle) * PILLOW_OUTLINE_SCALE;
+  let radial = Math.pow(THREE.MathUtils.clamp(distance / Math.max(outline, 0.001), 0, 0.94), 1 / 0.94);
+
+  for (let iteration = 0; iteration < 5; iteration += 1) {
+    const point = pillowFacePoint(angle, radial, side);
+    const pointDistance = Math.hypot(point.x, point.y);
+
+    if (pointDistance > 0.0001) {
+      radial *= THREE.MathUtils.clamp(distance / pointDistance, 0.82, 1.18);
+      radial = THREE.MathUtils.clamp(radial, 0, 0.94);
+    }
+  }
+
+  const point = pillowFacePoint(angle, radial, side);
+
+  point.z += side * offset;
+
+  return point;
+}
+
 function createVelvetMaterial(brushMap, noiseMap) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -554,6 +624,23 @@ function createCordMaterial(brushMap, noiseMap) {
   material.uniforms.cyanColor.value.set(0x7deaff);
 
   return material;
+}
+
+function createGlyphMaterial() {
+  return new THREE.MeshPhysicalMaterial({
+    clearcoat: 1,
+    clearcoatRoughness: 0.08,
+    color: 0xc8f7ff,
+    emissive: 0x2a9ed6,
+    emissiveIntensity: 0.38,
+    ior: 1.48,
+    metalness: 0.08,
+    reflectivity: 0.92,
+    roughness: 0.2,
+    sheen: 0,
+    specularColor: 0xffffff,
+    specularIntensity: 1,
+  });
 }
 
 function createNapTexture() {
