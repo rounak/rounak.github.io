@@ -13,16 +13,16 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
-renderer.setClearColor(0x030711, 1);
+renderer.toneMappingExposure = 1.58;
+renderer.setClearColor(0x071126, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x030711);
-scene.fog = new THREE.FogExp2(0x071124, 0.034);
+scene.background = new THREE.Color(0x071126);
+scene.fog = new THREE.FogExp2(0x08142a, 0.024);
 
-const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 80);
-camera.position.set(0, 0.16, 5.55);
+const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 80);
+camera.position.set(0, 0.1, 5.35);
 
 const pointer = new THREE.Vector2();
 const pointerNdc = new THREE.Vector2(10, 10);
@@ -30,12 +30,13 @@ const raycaster = new THREE.Raycaster();
 const startTime = performance.now();
 const qaState = {
   brushStrokes: 0,
+  flippedSequins: 0,
   frameCount: 0,
   lastBrushUv: [0, 0],
-  napTexture: "",
   pillowVertices: 0,
   renderReady: false,
   rotationY: 0,
+  sequinCount: 0,
 };
 
 window.__pillowQA = qaState;
@@ -54,21 +55,23 @@ const ICON_OUTLINE_SAMPLES = [
   0.9909, 0.9707, 0.9405, 0.9103, 0.9371, 0.9674, 0.9909, 1.0110, 1.0278,
   1.0379, 1.0446, 1.0480, 1.0446, 1.0379, 1.0278,
 ];
-const PILLOW_OUTLINE_SCALE = 1.12;
-const PILLOW_UV_EXTENT = 1.28;
-const EDGE_Z = 0.18;
-const BULGE_Z = 0.52;
+const PILLOW_SCALE = 1.12;
+const PILLOW_DEPTH_SCALE = 0.44;
+const PILLOW_UV_EXTENT = 1.36;
+const MIN_BRUSH_RADIUS = 0.13;
+const MAX_BRUSH_RADIUS = 0.36;
+const MIN_BRUSH_TRAVEL = 0.018;
+const FRONT_SIDE = 1;
 
-const napTexture = createNapTexture();
-const noiseTexture = createNoiseTexture();
-const velvetMaterial = createVelvetMaterial(napTexture, noiseTexture);
-const cordMaterial = createCordMaterial(napTexture, noiseTexture);
+const fabricMaterial = createFabricMaterial();
+const seamMaterial = createSeamMaterial();
+const sequinMaterial = createSequinMaterial();
 const glyphMaterial = createGlyphMaterial();
 const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
-pillowGroup.rotation.set(-0.08, -0.38, 0.035);
-pillowGroup.position.y = 0.1;
+pillowGroup.rotation.set(-0.08, -0.24, 0.025);
+pillowGroup.position.y = 0.12;
 scene.add(pillowGroup);
 
 const pillow = createPillow();
@@ -84,15 +87,16 @@ scene.add(glowShards.group);
 
 const brushTargets = pillow.brushTargets;
 qaState.pillowVertices = pillow.vertexCount;
+qaState.sequinCount = pillow.sequins.count;
 
 let paused = false;
 let brushSize = Number.parseFloat(brushSizeInput.value);
 let firstFrame = true;
 let lastFrameTime = performance.now();
-let lastBrushPoint = null;
 let activePointerId = null;
+let lastBrushLocalPoint = null;
+let presentationTime = 0;
 let hoverFade = 0;
-let spinAngle = -0.38;
 
 toggleButton.addEventListener("click", () => {
   paused = !paused;
@@ -102,8 +106,9 @@ toggleButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", () => {
-  resetNapTexture();
-  lastBrushPoint = null;
+  pillow.sequins.reset();
+  qaState.brushStrokes = 0;
+  qaState.flippedSequins = 0;
 });
 
 brushSizeInput.addEventListener("input", () => {
@@ -112,37 +117,42 @@ brushSizeInput.addEventListener("input", () => {
 
 canvas.addEventListener("pointerdown", (event) => {
   activePointerId = event.pointerId;
+  lastBrushLocalPoint = null;
   canvas.setPointerCapture(event.pointerId);
   updatePointer(event);
-  paintFromPointer(event, true);
+  reverseSequinsFromPointer(event);
   event.preventDefault();
 });
 
 canvas.addEventListener("pointermove", (event) => {
   updatePointer(event);
-  paintFromPointer(event, false);
+
+  if (activePointerId === event.pointerId) {
+    reverseSequinsFromPointer(event);
+    event.preventDefault();
+  }
 });
 
 canvas.addEventListener("pointerup", (event) => {
   if (activePointerId === event.pointerId) {
     activePointerId = null;
+    lastBrushLocalPoint = null;
   }
 
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
   }
-
-  lastBrushPoint = null;
 });
 
 canvas.addEventListener("pointercancel", () => {
   activePointerId = null;
-  lastBrushPoint = null;
+  lastBrushLocalPoint = null;
 });
 
 canvas.addEventListener("pointerleave", () => {
-  lastBrushPoint = null;
   pointerNdc.set(10, 10);
+  hoverFade = 0;
+  lastBrushLocalPoint = null;
 });
 
 window.addEventListener("resize", resize);
@@ -157,38 +167,37 @@ function animate() {
   const elapsed = (now - startTime) / 1000;
   lastFrameTime = now;
 
-  const motion = paused ? 0 : 1;
-  spinAngle += delta * 0.52 * motion;
-
-  const targetY = spinAngle + pointer.x * 0.16;
-  pillowGroup.rotation.x += (-0.08 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.035;
-  pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
-  pillowGroup.rotation.z += ((0.035 + pointer.x * 0.018) - pillowGroup.rotation.z) * 0.026;
-
-  if (motion) {
-    pillow.group.rotation.y = Math.sin(elapsed * 0.38) * 0.035;
-    pillow.group.position.y = Math.sin(elapsed * 0.72) * 0.026;
+  if (!paused && activePointerId === null) {
+    presentationTime += delta;
   }
 
-  velvetMaterial.uniforms.time.value = elapsed;
-  cordMaterial.uniforms.time.value = elapsed;
-  velvetMaterial.uniforms.hover.value += (hoverFade - velvetMaterial.uniforms.hover.value) * 0.09;
+  const frontBiasedTurn = -0.22 + Math.sin(presentationTime * 0.58) * 0.34;
+  const targetY = frontBiasedTurn + pointer.x * 0.1;
+
+  pillowGroup.rotation.x += (-0.07 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.04;
+  pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
+  pillowGroup.rotation.z += ((0.025 + pointer.x * 0.018) - pillowGroup.rotation.z) * 0.03;
+  pillow.group.position.y = Math.sin(presentationTime * 0.82) * 0.018;
+
+  fabricMaterial.uniforms.time.value = elapsed;
+  fabricMaterial.uniforms.hover.value += (hoverFade - fabricMaterial.uniforms.hover.value) * 0.08;
   updateLights(elapsed);
   updateGlowShards(elapsed);
-  ambientDust.rotation.y = elapsed * 0.012;
+  ambientDust.rotation.y = elapsed * 0.008;
 
   renderer.render(scene, camera);
 
   if (firstFrame) {
     firstFrame = false;
     canvas.dataset.pillowVertices = String(qaState.pillowVertices);
-    canvas.dataset.napTexture = qaState.napTexture;
+    canvas.dataset.sequinCount = String(qaState.sequinCount);
   }
 
   qaState.frameCount += 1;
   qaState.renderReady = true;
   qaState.rotationY = pillowGroup.rotation.y;
   canvas.dataset.brushStrokes = String(qaState.brushStrokes);
+  canvas.dataset.flippedSequins = String(qaState.flippedSequins);
   canvas.dataset.frameCount = String(qaState.frameCount);
   canvas.dataset.lastBrushUv = qaState.lastBrushUv.join(",");
   canvas.dataset.renderReady = String(qaState.renderReady);
@@ -204,7 +213,7 @@ function updatePointer(event) {
   pointerNdc.set(pointer.x, -pointer.y);
 }
 
-function paintFromPointer(event, forceDot) {
+function reverseSequinsFromPointer(event) {
   if (activePointerId !== null && event.pointerId !== activePointerId) {
     return;
   }
@@ -213,24 +222,55 @@ function paintFromPointer(event, forceDot) {
 
   const intersections = raycaster.intersectObjects(brushTargets, false);
 
-  if (intersections.length === 0 || !intersections[0].uv) {
+  if (intersections.length === 0) {
     hoverFade = 0;
-    lastBrushPoint = null;
     return;
   }
 
+  const localPoint = pillow.group.worldToLocal(intersections[0].point.clone());
+
+  if (localPoint.z < 0.02) {
+    hoverFade = 0;
+    return;
+  }
+
+  const brushRadius = THREE.MathUtils.mapLinear(
+    brushSize,
+    Number.parseFloat(brushSizeInput.min),
+    Number.parseFloat(brushSizeInput.max),
+    MIN_BRUSH_RADIUS,
+    MAX_BRUSH_RADIUS,
+  );
+  const brushDirection = new THREE.Vector2();
+
   hoverFade = 1;
+  qaState.lastBrushUv = [
+    Number(THREE.MathUtils.clamp(0.5 + localPoint.x / (PILLOW_UV_EXTENT * 2), 0, 1).toFixed(4)),
+    Number(THREE.MathUtils.clamp(0.5 + localPoint.y / (PILLOW_UV_EXTENT * 2), 0, 1).toFixed(4)),
+  ];
 
-  const uv = intersections[0].uv.clone();
-  const x = uv.x * napTexture.image.width;
-  const y = (1 - uv.y) * napTexture.image.height;
-  const current = new THREE.Vector2(x, y);
-  const previous = forceDot ? null : lastBrushPoint;
+  if (!lastBrushLocalPoint) {
+    lastBrushLocalPoint = localPoint.clone();
+    return;
+  }
 
-  brushVelvet(current, previous);
-  lastBrushPoint = current;
-  qaState.brushStrokes += 1;
-  qaState.lastBrushUv = [Number(uv.x.toFixed(4)), Number(uv.y.toFixed(4))];
+  brushDirection.set(
+    localPoint.x - lastBrushLocalPoint.x,
+    localPoint.y - lastBrushLocalPoint.y,
+  );
+
+  if (brushDirection.lengthSq() < MIN_BRUSH_TRAVEL * MIN_BRUSH_TRAVEL) {
+    return;
+  }
+
+  brushDirection.normalize();
+  const touched = pillow.sequins.brushAt(localPoint, brushRadius, brushDirection);
+  lastBrushLocalPoint.copy(localPoint);
+
+  if (touched > 0) {
+    qaState.brushStrokes += 1;
+    qaState.flippedSequins = pillow.sequins.flippedCount;
+  }
 }
 
 function resize() {
@@ -240,84 +280,80 @@ function resize() {
   const responsivePullback = THREE.MathUtils.clamp(1.08 / aspect, 1, 2.18);
 
   camera.aspect = aspect;
-  camera.position.z = 5.55 * responsivePullback;
+  camera.position.z = 5.35 * responsivePullback;
   camera.updateProjectionMatrix();
   renderer.setSize(width, height, false);
 }
 
 function createPillow() {
   const group = new THREE.Group();
-  const frontGeometry = createPillowFaceGeometry(1);
-  const backGeometry = createPillowFaceGeometry(-1);
-  const sideGeometry = createPillowSideGeometry();
-  const front = new THREE.Mesh(frontGeometry, velvetMaterial);
-  const back = new THREE.Mesh(backGeometry, velvetMaterial);
-  const side = new THREE.Mesh(sideGeometry, velvetMaterial);
-  const frontPipe = createPiping(1, 1.012, 0.042, cordMaterial);
-  const backPipe = createPiping(-1, 1.012, 0.038, cordMaterial);
+  const bodyGeometry = createCushionGeometry();
+  const body = new THREE.Mesh(bodyGeometry, fabricMaterial);
+  const frontSeam = createSeamCord(FRONT_SIDE, 0.975, 0.013);
+  const backSeam = createSeamCord(-FRONT_SIDE, 0.975, 0.011);
+  const sequins = createSequinSystem();
   const promptGlyph = createPromptGlyph();
 
-  front.frustumCulled = false;
-  back.frustumCulled = false;
-  side.frustumCulled = false;
-  frontPipe.frustumCulled = false;
-  backPipe.frustumCulled = false;
+  body.frustumCulled = false;
+  frontSeam.frustumCulled = false;
+  backSeam.frustumCulled = false;
+  sequins.mesh.frustumCulled = false;
   promptGlyph.traverse((child) => {
     child.frustumCulled = false;
   });
 
-  group.add(back, side, front, frontPipe, backPipe, promptGlyph);
+  group.add(body, sequins.mesh, frontSeam, backSeam, promptGlyph);
 
   return {
-    brushTargets: [front, back],
+    brushTargets: [body],
     group,
-    vertexCount:
-      frontGeometry.getAttribute("position").count
-      + backGeometry.getAttribute("position").count
-      + sideGeometry.getAttribute("position").count,
+    hitMesh: body,
+    sequins,
+    vertexCount: bodyGeometry.getAttribute("position").count,
   };
 }
 
-function createPillowFaceGeometry(side) {
-  const segments = 104;
-  const rowSize = segments + 1;
+function createCushionGeometry() {
+  const latBands = 72;
+  const lonBands = 144;
   const positions = [];
   const uvs = [];
   const edgePressures = [];
   const indices = [];
 
-  for (let row = 0; row <= segments; row += 1) {
-    const v = row / segments * 2 - 1;
+  for (let lat = 0; lat <= latBands; lat += 1) {
+    const theta = lat / latBands * Math.PI;
+    const sinTheta = Math.sin(theta);
 
-    for (let column = 0; column <= segments; column += 1) {
-      const u = column / segments * 2 - 1;
-      const polar = squarePointToPolar(u, v);
-      const point = pillowFacePoint(polar.angle, polar.radial, side);
-      const edgePressure = smoothstep(0.72, 1, polar.radial);
+    for (let lon = 0; lon <= lonBands; lon += 1) {
+      const phi = lon / lonBands * Math.PI * 2;
+      const direction = new THREE.Vector3(
+        sinTheta * Math.cos(phi),
+        Math.cos(theta),
+        sinTheta * Math.sin(phi),
+      );
+      const point = cushionPointFromDirection(direction);
+      const edgePressure = smoothstep(0.78, 1, Math.hypot(direction.x, direction.y));
 
       positions.push(point.x, point.y, point.z);
       uvs.push(
-        side > 0
-          ? 0.5 + point.x / (PILLOW_UV_EXTENT * 2)
-          : 0.5 - point.x / (PILLOW_UV_EXTENT * 2),
-        0.5 + point.y / (PILLOW_UV_EXTENT * 2),
+        THREE.MathUtils.clamp(0.5 + point.x / (PILLOW_UV_EXTENT * 2), 0, 1),
+        THREE.MathUtils.clamp(0.5 + point.y / (PILLOW_UV_EXTENT * 2), 0, 1),
       );
       edgePressures.push(edgePressure);
     }
   }
 
-  for (let row = 0; row < segments; row += 1) {
-    for (let column = 0; column < segments; column += 1) {
-      const a = row * rowSize + column;
+  const rowSize = lonBands + 1;
+
+  for (let lat = 0; lat < latBands; lat += 1) {
+    for (let lon = 0; lon < lonBands; lon += 1) {
+      const a = lat * rowSize + lon;
       const b = a + 1;
       const c = a + rowSize;
       const d = c + 1;
 
-      if (side > 0) {
-        indices.push(a, b, c, b, d, c);
-      } else {
-        indices.push(a, c, b, b, c, d);
-      }
+      indices.push(a, c, b, b, c, d);
     }
   }
 
@@ -332,199 +368,288 @@ function createPillowFaceGeometry(side) {
   return geometry;
 }
 
-function createPillowSideGeometry() {
-  const perimeter = createBoundarySamples(1, 1, 192);
-  const backPerimeter = createBoundarySamples(-1, 1, 192);
-  const sideSegments = 18;
-  const positions = [];
-  const uvs = [];
-  const edgePressures = [];
-  const indices = [];
-  const count = perimeter.length;
+function cushionPointFromDirection(direction, offset = 0) {
+  const radius = cushionRadius(direction) + offset;
 
-  for (let index = 0; index < count; index += 1) {
-    const front = perimeter[index];
-    const back = backPerimeter[index];
-    const outward = new THREE.Vector2(front.x, front.y).normalize();
-
-    for (let row = 0; row <= sideSegments; row += 1) {
-      const t = row / sideSegments;
-      const sideBulge = Math.sin(t * Math.PI) * 0.13;
-      const cordPinch = 1 - Math.pow(Math.sin(t * Math.PI), 8) * 0.04;
-      const weltRipple = Math.sin(index * 0.42) * 0.008 * Math.sin(t * Math.PI);
-      const point = new THREE.Vector3().lerpVectors(front, back, t);
-
-      point.x = point.x * cordPinch + outward.x * (sideBulge + weltRipple);
-      point.y = point.y * cordPinch + outward.y * (sideBulge + weltRipple);
-      positions.push(point.x, point.y, point.z);
-      uvs.push(index / (count - 1), t);
-      edgePressures.push(1);
-    }
-  }
-
-  const rowSize = sideSegments + 1;
-
-  for (let index = 0; index < count; index += 1) {
-    const next = (index + 1) % count;
-
-    for (let row = 0; row < sideSegments; row += 1) {
-      const a = index * rowSize + row;
-      const b = next * rowSize + row;
-      const c = a + 1;
-      const d = b + 1;
-      indices.push(a, b, c, b, d, c);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setIndex(indices);
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setAttribute("edgePressure", new THREE.Float32BufferAttribute(edgePressures, 1));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
-
-  return geometry;
-}
-
-function pillowFacePoint(angle, radial, side) {
-  const outline = sampleIconOutline(angle) * PILLOW_OUTLINE_SCALE;
-  const easedRadial = Math.pow(radial, 0.94);
-  const edgePressure = smoothstep(0.72, 1, radial);
-  const coreBulge = Math.pow(Math.max(0, 1 - Math.pow(radial, 2.38)), 0.78);
-  const seamPinch = 1 - edgePressure * 0.035;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const x = cos * outline * easedRadial * seamPinch;
-  const y = sin * outline * easedRadial * seamPinch;
-  const wrinkleFade = smoothstep(0.28, 0.82, radial);
-  const wrinkle = wrinkleFade * (
-    Math.sin((cos * 4.8 + sin * 1.2) * Math.PI + radial * 1.1) * 0.0045
-    + Math.sin((sin * 4.6 - cos * 0.7) * Math.PI - radial * 0.8) * 0.0035
+  return new THREE.Vector3(
+    direction.x * radius,
+    direction.y * radius,
+    direction.z * radius * PILLOW_DEPTH_SCALE,
   );
-  const crown = EDGE_Z + BULGE_Z * coreBulge;
-  const z = side * (crown + wrinkle * (0.25 + coreBulge * 0.75));
-
-  return new THREE.Vector3(x, y, z);
 }
 
-function squarePointToPolar(u, v) {
-  const distance = Math.hypot(u, v);
+function cushionRadius(direction) {
+  const planarAmount = Math.hypot(direction.x, direction.y);
+  const outline = sampleCushionOutline(Math.atan2(direction.y, direction.x));
+  const contourStrength = Math.pow(THREE.MathUtils.clamp(planarAmount, 0, 1), 0.38);
+  const capRoundness = 0.935 + Math.pow(planarAmount, 1.8) * 0.065;
+  const seamCompression = smoothstep(0.82, 1, planarAmount) * 0.034;
+  const clothIrregularity = Math.sin(Math.atan2(direction.y, direction.x) * 5.0 + direction.z * 0.9) * 0.006
+    * smoothstep(0.35, 0.92, planarAmount);
 
-  if (distance < 0.0001) {
-    return { angle: 0, radial: 0 };
+  return PILLOW_SCALE
+    * THREE.MathUtils.lerp(0.94, outline, contourStrength)
+    * capRoundness
+    - seamCompression
+    + clothIrregularity;
+}
+
+function cushionSurfacePointFromXY(x, y, side = FRONT_SIDE, offset = 0) {
+  const planarRadius = Math.hypot(x, y);
+  let unscaledZ = Math.sqrt(Math.max(0, Math.pow(PILLOW_SCALE * 1.08, 2) - planarRadius * planarRadius));
+  const direction = new THREE.Vector3();
+
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    direction.set(x, y, side * unscaledZ).normalize();
+
+    const radius = cushionRadius(direction) + offset;
+    unscaledZ = Math.sqrt(Math.max(0, radius * radius - planarRadius * planarRadius));
   }
 
-  const angle = Math.atan2(v, u);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const radial = Math.min(1, distance * Math.max(Math.abs(cos), Math.abs(sin)));
-
-  return { angle, radial };
+  return new THREE.Vector3(x, y, side * unscaledZ * PILLOW_DEPTH_SCALE);
 }
 
-function createBoundarySamples(side, inset = 1, samples = 144) {
+function cushionNormalFromXY(x, y, side = FRONT_SIDE) {
+  const epsilon = 0.006;
+  const center = cushionSurfacePointFromXY(x, y, side);
+  const dx = new THREE.Vector3()
+    .subVectors(cushionSurfacePointFromXY(x + epsilon, y, side), cushionSurfacePointFromXY(x - epsilon, y, side));
+  const dy = new THREE.Vector3()
+    .subVectors(cushionSurfacePointFromXY(x, y + epsilon, side), cushionSurfacePointFromXY(x, y - epsilon, side));
+  const normal = new THREE.Vector3().crossVectors(dx, dy).normalize();
+
+  if (side < 0) {
+    normal.negate();
+  }
+
+  if (normal.lengthSq() < 0.5) {
+    normal.set(0, 0, side);
+  }
+
+  return { normal, point: center };
+}
+
+function createBoundarySamples(side, inset = 0.965, samples = 192) {
   const points = [];
 
   for (let index = 0; index < samples; index += 1) {
     const angle = index / samples * Math.PI * 2;
-    points.push(pillowFacePoint(angle, inset, side));
+    const outline = sampleCushionOutline(angle) * PILLOW_SCALE * inset;
+    const x = Math.cos(angle) * outline;
+    const y = Math.sin(angle) * outline;
+
+    points.push(cushionSurfacePointFromXY(x, y, side, 0.008));
   }
 
   return points;
 }
 
-function createPiping(side, inset, radius, material) {
-  const points = createBoundarySamples(side, inset, 192).map((point) => {
-    const normalOffset = new THREE.Vector3(point.x, point.y, 0).normalize().multiplyScalar(0.018);
-    return new THREE.Vector3(point.x + normalOffset.x, point.y + normalOffset.y, point.z + side * 0.024);
-  });
+function createSeamCord(side, inset, radius) {
+  const points = createBoundarySamples(side, inset, 216);
   const curve = new THREE.CatmullRomCurve3(points, true, "catmullrom", 0.5);
-  const geometry = new THREE.TubeGeometry(curve, 192, radius, 16, true);
-  const edgePressures = new Float32Array(geometry.getAttribute("position").count).fill(1);
+  const geometry = new THREE.TubeGeometry(curve, 216, radius, 12, true);
+  const mesh = new THREE.Mesh(geometry, seamMaterial);
 
-  geometry.setAttribute("edgePressure", new THREE.BufferAttribute(edgePressures, 1));
-  geometry.computeVertexNormals();
+  mesh.renderOrder = 2;
 
-  return new THREE.Mesh(geometry, material);
+  return mesh;
+}
+
+function createSequinSystem() {
+  const records = [];
+  const spacing = 0.066;
+  const rowStep = spacing * 0.86;
+  let row = 0;
+
+  for (let y = -1.04; y <= 1.04; y += rowStep) {
+    const xOffset = row % 2 === 0 ? 0 : spacing * 0.5;
+
+    for (let x = -1.17 + xOffset; x <= 1.17; x += spacing) {
+      const angle = Math.atan2(y, x);
+      const distance = Math.hypot(x, y);
+      const outline = sampleCushionOutline(angle) * PILLOW_SCALE;
+      const radial = distance / outline;
+
+      if (radial < 0.03 || distance + spacing * 0.66 > outline * 0.93) {
+        continue;
+      }
+
+      const jitterX = (seededNoise(records.length * 9.7) - 0.5) * spacing * 0.18;
+      const jitterY = (seededNoise(records.length * 13.1) - 0.5) * spacing * 0.18;
+      const px = x + jitterX;
+      const py = y + jitterY;
+      const surface = cushionNormalFromXY(px, py, FRONT_SIDE);
+      const tangent = new THREE.Vector3(1, 0, 0).projectOnVector(surface.normal).lengthSq() > 0.96
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(1, 0, 0);
+
+      tangent.projectOnPlane(surface.normal).normalize();
+
+      const bitangent = new THREE.Vector3().crossVectors(surface.normal, tangent).normalize();
+      const baseHue = 0.595 + seededNoise(records.length * 4.2) * 0.045;
+      const frontColor = new THREE.Color().setHSL(
+        baseHue,
+        0.92,
+        0.43 + seededNoise(records.length * 6.3) * 0.14,
+      );
+      const reverseColor = new THREE.Color().setHSL(
+        0.49 + seededNoise(records.length * 8.6) * 0.05,
+        0.38,
+        0.84 + seededNoise(records.length * 7.1) * 0.12,
+      );
+
+      records.push({
+        bitangent,
+        flipped: false,
+        frontColor,
+        hinge: seededNoise(records.length * 3.8) > 0.5 ? 1 : -1,
+        normal: surface.normal,
+        phase: seededNoise(records.length * 11.7) * Math.PI * 2,
+        position: surface.point.addScaledVector(surface.normal, 0.044),
+        radius: spacing * (0.55 + seededNoise(records.length * 2.9) * 0.08),
+        reverseColor,
+        spin: seededNoise(records.length * 5.4) * Math.PI * 2,
+        tangent,
+        x: px,
+        y: py,
+      });
+    }
+
+    row += 1;
+  }
+
+  const geometry = new THREE.CircleGeometry(1, 14);
+  const mesh = new THREE.InstancedMesh(geometry, sequinMaterial, records.length);
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  const zAxis = new THREE.Vector3(0, 0, 1);
+  const qBase = new THREE.Quaternion();
+  const qSpin = new THREE.Quaternion();
+  const qTilt = new THREE.Quaternion();
+
+  function updateInstance(index) {
+    const record = records[index];
+    const tilt = record.flipped
+      ? record.hinge * (0.46 + seededNoise(index * 12.5) * 0.18)
+      : record.hinge * (-0.05 + seededNoise(index * 10.4) * 0.08);
+
+    qBase.setFromUnitVectors(zAxis, record.normal);
+    qSpin.setFromAxisAngle(zAxis, record.spin);
+    qTilt.setFromAxisAngle(new THREE.Vector3(1, 0, 0), tilt);
+
+    dummy.position.copy(record.position);
+    dummy.position.addScaledVector(record.normal, record.flipped ? 0.018 : 0);
+    dummy.quaternion.copy(qBase).multiply(qSpin).multiply(qTilt);
+    dummy.scale.setScalar(record.radius);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(index, dummy.matrix);
+
+    color.copy(record.flipped ? record.reverseColor : record.frontColor);
+    mesh.setColorAt(index, color);
+  }
+
+  records.forEach((_, index) => updateInstance(index));
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceColor.needsUpdate = true;
+  mesh.renderOrder = 4;
+
+  return {
+    count: records.length,
+    flippedCount: 0,
+    mesh,
+    records,
+    reset() {
+      this.flippedCount = 0;
+
+      records.forEach((record, index) => {
+        record.flipped = false;
+        updateInstance(index);
+      });
+
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.instanceColor.needsUpdate = true;
+    },
+    brushAt(localPoint, radius, direction) {
+      let touched = 0;
+      const strokeAngle = Math.atan2(direction.y, direction.x) + Math.PI * 0.5;
+      const targetFlipped = direction.x + direction.y * 0.16 >= 0;
+      const hinge = targetFlipped ? 1 : -1;
+
+      records.forEach((record, index) => {
+        const distance = Math.hypot(record.x - localPoint.x, record.y - localPoint.y);
+
+        if (distance <= radius) {
+          if (record.flipped !== targetFlipped) {
+            this.flippedCount += targetFlipped ? 1 : -1;
+          }
+
+          record.flipped = targetFlipped;
+          record.hinge = hinge;
+          record.spin = strokeAngle + (seededNoise(index * 23.9) - 0.5) * 0.18;
+          updateInstance(index);
+          touched += 1;
+        }
+      });
+
+      if (touched > 0) {
+        this.flippedCount = Math.max(0, Math.min(records.length, this.flippedCount));
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
+      }
+
+      return touched;
+    },
+  };
 }
 
 function createPromptGlyph() {
   const group = new THREE.Group();
   const segments = [
-    [new THREE.Vector2(-0.5, 0.3), new THREE.Vector2(-0.08, 0.02)],
-    [new THREE.Vector2(-0.5, -0.26), new THREE.Vector2(-0.08, 0.02)],
-    [new THREE.Vector2(0.16, -0.3), new THREE.Vector2(0.62, -0.3)],
+    [new THREE.Vector2(-0.46, 0.28), new THREE.Vector2(-0.08, 0.02)],
+    [new THREE.Vector2(-0.46, -0.24), new THREE.Vector2(-0.08, 0.02)],
+    [new THREE.Vector2(0.16, -0.3), new THREE.Vector2(0.56, -0.3)],
   ];
 
-  [-1, 1].forEach((side) => {
-    segments.forEach(([start, end], index) => {
-      const radius = index === 2 ? 0.03 : 0.035;
-      group.add(createRaisedGlyphSegment(start, end, side, radius));
-    });
+  segments.forEach(([start, end], index) => {
+    group.add(createRaisedGlyphSegment(start, end, index === 2 ? 0.021 : 0.026));
   });
 
   return group;
 }
 
-function createRaisedGlyphSegment(start, end, side, radius) {
+function createRaisedGlyphSegment(start, end, radius) {
   const points = [];
-  const steps = 28;
+  const steps = 30;
 
   for (let index = 0; index <= steps; index += 1) {
     const t = index / steps;
     const x = THREE.MathUtils.lerp(start.x, end.x, t);
     const y = THREE.MathUtils.lerp(start.y, end.y, t);
 
-    points.push(pillowSurfacePointFromXY(x, y, side, 0.078));
+    points.push(cushionSurfacePointFromXY(x, y, FRONT_SIDE, 0.086));
   }
 
-  const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.12);
-  const geometry = new THREE.TubeGeometry(curve, 36, radius, 18, false);
+  const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
+  const geometry = new THREE.TubeGeometry(curve, 34, radius, 14, false);
   const mesh = new THREE.Mesh(geometry, glyphMaterial);
 
-  mesh.renderOrder = 3;
+  mesh.renderOrder = 5;
 
   return mesh;
 }
 
-function pillowSurfacePointFromXY(x, y, side, offset = 0) {
-  const angle = Math.atan2(y, x);
-  const distance = Math.hypot(x, y);
-  const outline = sampleIconOutline(angle) * PILLOW_OUTLINE_SCALE;
-  let radial = Math.pow(THREE.MathUtils.clamp(distance / Math.max(outline, 0.001), 0, 0.94), 1 / 0.94);
-
-  for (let iteration = 0; iteration < 5; iteration += 1) {
-    const point = pillowFacePoint(angle, radial, side);
-    const pointDistance = Math.hypot(point.x, point.y);
-
-    if (pointDistance > 0.0001) {
-      radial *= THREE.MathUtils.clamp(distance / pointDistance, 0.82, 1.18);
-      radial = THREE.MathUtils.clamp(radial, 0, 0.94);
-    }
-  }
-
-  const point = pillowFacePoint(angle, radial, side);
-
-  point.z += side * offset;
-
-  return point;
-}
-
-function createVelvetMaterial(brushMap, noiseMap) {
+function createFabricMaterial() {
   return new THREE.ShaderMaterial({
     uniforms: {
-      baseColor: { value: new THREE.Color(0x1968c9) },
-      brushMap: { value: brushMap },
-      cyanColor: { value: new THREE.Color(0x84eaff) },
-      deepColor: { value: new THREE.Color(0x061b45) },
+      baseColor: { value: new THREE.Color(0x122d62) },
+      deepColor: { value: new THREE.Color(0x070d22) },
       hover: { value: 0 },
-      lightA: { value: new THREE.Vector3(-3.4, 2.7, 3.8) },
-      lightB: { value: new THREE.Vector3(3.3, 1.1, 2.4) },
-      lightC: { value: new THREE.Vector3(0.4, -2.3, 3.2) },
-      noiseMap: { value: noiseMap },
-      sheenColor: { value: new THREE.Color(0xeaf8ff) },
+      lightA: { value: new THREE.Vector3(-3.2, 2.4, 3.7) },
+      lightB: { value: new THREE.Vector3(2.7, 1.2, 2.7) },
       time: { value: 0 },
+      warmColor: { value: new THREE.Color(0x7b6b56) },
     },
     vertexShader: `
       attribute float edgePressure;
@@ -545,16 +670,12 @@ function createVelvetMaterial(brushMap, noiseMap) {
     `,
     fragmentShader: `
       uniform vec3 baseColor;
-      uniform sampler2D brushMap;
-      uniform vec3 cyanColor;
       uniform vec3 deepColor;
       uniform float hover;
       uniform vec3 lightA;
       uniform vec3 lightB;
-      uniform vec3 lightC;
-      uniform sampler2D noiseMap;
-      uniform vec3 sheenColor;
       uniform float time;
+      uniform vec3 warmColor;
 
       varying float vEdgePressure;
       varying vec2 vUv;
@@ -565,49 +686,21 @@ function createVelvetMaterial(brushMap, noiseMap) {
         return clamp(value, 0.0, 1.0);
       }
 
-      float softLight(float base, float blend) {
-        return blend < 0.5
-          ? 2.0 * base * blend + base * base * (1.0 - 2.0 * blend)
-          : sqrt(base) * (2.0 * blend - 1.0) + 2.0 * base * (1.0 - blend);
-      }
-
-      float wrapLight(vec3 normal, vec3 lightDirection) {
-        return pow(clamp01(dot(normal, lightDirection) * 0.5 + 0.5), 1.65);
-      }
-
       void main() {
         vec3 normal = normalize(vNormal);
         vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
         vec3 lightDirectionA = normalize(lightA - vWorldPosition);
         vec3 lightDirectionB = normalize(lightB - vWorldPosition);
-        vec3 lightDirectionC = normalize(lightC - vWorldPosition);
+        float woven = sin(vUv.y * 260.0 + sin(vUv.x * 28.0) * 1.2) * 0.018
+          + sin(vUv.x * 210.0) * 0.008;
+        float diffuse = clamp01(dot(normal, lightDirectionA) * 0.45 + 0.55);
+        float fill = clamp01(dot(normal, lightDirectionB) * 0.5 + 0.5);
+        float rim = pow(1.0 - clamp01(dot(normal, viewDirection)), 2.4);
+        vec3 color = mix(deepColor, baseColor, 0.46 + diffuse * 0.32 + fill * 0.16 + woven);
 
-        float nap = texture2D(brushMap, vUv).r;
-        float fineNoise = texture2D(noiseMap, vUv * vec2(38.0, 96.0)).r;
-        float fiberLines =
-          sin((vUv.y * 250.0 + fineNoise * 1.8) + sin(vUv.x * 31.0) * 1.2) * 0.013
-          + sin(vUv.x * 126.0 + vUv.y * 38.0) * 0.004;
-        float brushed = (nap - 0.5) * 2.0;
-        float fiber = fiberLines;
-        float velvetTone = clamp01(0.4 + nap * 0.5 + fiber - vEdgePressure * 0.11);
-        vec3 color = mix(deepColor, baseColor, velvetTone);
-        color = mix(color, cyanColor, clamp01((nap - 0.63) * 0.58 + hover * 0.035));
-
-        float diffuseA = wrapLight(normal, lightDirectionA);
-        float diffuseB = wrapLight(normal, lightDirectionB);
-        float diffuseC = wrapLight(normal, lightDirectionC);
-        float fresnel = pow(1.0 - clamp01(dot(normal, viewDirection)), 1.72);
-        float sheenA = pow(clamp01(dot(normalize(lightDirectionA + viewDirection), normal)), 28.0);
-        float sheenB = pow(clamp01(dot(normalize(lightDirectionB + viewDirection), normal)), 38.0);
-        float napSheen = softLight(clamp01(nap + fiber), 0.72);
-        float edgeShadow = 1.0 - vEdgePressure * 0.18;
-        float light = 0.42 + diffuseA * 0.48 + diffuseB * 0.25 + diffuseC * 0.18;
-
-        color *= light * edgeShadow;
-        color += sheenColor * (sheenA * 0.18 + sheenB * 0.12) * (0.25 + napSheen);
-        color += cyanColor * fresnel * (0.33 + brushed * 0.12);
-        color += vec3(0.008, 0.028, 0.065) * (1.0 - nap) * 0.62;
-        color = pow(color, vec3(0.94));
+        color = mix(color, warmColor, 0.05 + rim * 0.08);
+        color *= 1.0 - vEdgePressure * 0.24;
+        color += vec3(0.06, 0.12, 0.19) * rim * (0.16 + hover * 0.06);
 
         gl_FragColor = vec4(color, 1.0);
       }
@@ -616,182 +709,94 @@ function createVelvetMaterial(brushMap, noiseMap) {
   });
 }
 
-function createCordMaterial(brushMap, noiseMap) {
-  const material = createVelvetMaterial(brushMap, noiseMap);
+function createSeamMaterial() {
+  return new THREE.MeshPhysicalMaterial({
+    clearcoat: 0.08,
+    color: 0x153e73,
+    metalness: 0,
+    roughness: 0.78,
+    sheen: 1,
+    sheenColor: 0x4d8ed2,
+    sheenRoughness: 0.86,
+  });
+}
 
-  material.uniforms.baseColor.value.set(0x145bb2);
-  material.uniforms.deepColor.value.set(0x061635);
-  material.uniforms.cyanColor.value.set(0x7deaff);
+function createSequinMaterial() {
+  return new THREE.ShaderMaterial({
+    fragmentShader: `
+      varying vec3 vColor;
+      varying vec2 vDiskUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
 
-  return material;
+      float sat(float value) {
+        return clamp(value, 0.0, 1.0);
+      }
+
+      void main() {
+        vec3 normal = normalize(vWorldNormal);
+        vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        float facing = sat(dot(normal, viewDirection));
+        float radius = length(vDiskUv);
+        float bevel = smoothstep(0.70, 0.99, radius);
+        float crescent = smoothstep(0.12, 0.0, abs(vDiskUv.y - 0.22))
+          * smoothstep(0.78, 0.18, abs(vDiskUv.x + 0.12));
+        float crossSheen = sin((vDiskUv.x * 9.0 + vDiskUv.y * 6.0) + vWorldPosition.x * 3.0) * 0.045;
+        float rim = pow(1.0 - facing, 2.0);
+        vec3 color = vColor * (1.02 + facing * 0.2 + crossSheen);
+
+        color += vec3(0.32, 0.68, 1.0) * crescent * 0.28;
+        color += vec3(0.18, 0.44, 0.86) * rim * 0.14;
+        color *= 1.0 - bevel * 0.12;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    side: THREE.DoubleSide,
+    vertexShader: `
+      varying vec3 vColor;
+      varying vec2 vDiskUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vColor = instanceColor;
+        vDiskUv = position.xy;
+
+        vec4 instancedPosition = instanceMatrix * vec4(position, 1.0);
+        vec4 worldPosition = modelMatrix * instancedPosition;
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+  });
 }
 
 function createGlyphMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    clearcoat: 1,
-    clearcoatRoughness: 0.08,
-    color: 0xc8f7ff,
-    emissive: 0x2a9ed6,
-    emissiveIntensity: 0.38,
-    ior: 1.48,
-    metalness: 0.08,
-    reflectivity: 0.92,
-    roughness: 0.2,
-    sheen: 0,
-    specularColor: 0xffffff,
-    specularIntensity: 1,
+    clearcoat: 0.62,
+    clearcoatRoughness: 0.2,
+    color: 0xd8f9ff,
+    emissive: 0x12354c,
+    emissiveIntensity: 0.2,
+    metalness: 0.04,
+    reflectivity: 0.46,
+    roughness: 0.34,
   });
-}
-
-function createNapTexture() {
-  const textureCanvas = document.createElement("canvas");
-  textureCanvas.width = 1024;
-  textureCanvas.height = 1024;
-  const texture = new THREE.CanvasTexture(textureCanvas);
-
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = true;
-  qaState.napTexture = `${textureCanvas.width}x${textureCanvas.height}`;
-  resetNapTexture(textureCanvas, texture);
-
-  return texture;
-}
-
-function resetNapTexture(textureCanvas = napTexture?.image, texture = napTexture) {
-  if (!textureCanvas || !texture) {
-    return;
-  }
-
-  const context = textureCanvas.getContext("2d");
-  const width = textureCanvas.width;
-  const height = textureCanvas.height;
-
-  context.clearRect(0, 0, width, height);
-  context.fillStyle = "rgb(130, 130, 130)";
-  context.fillRect(0, 0, width, height);
-  context.save();
-  context.lineCap = "round";
-  context.lineJoin = "round";
-
-  for (let y = 0; y < height; y += 3) {
-    const value = Math.round(128 + Math.sin(y * 0.035) * 2.5);
-    context.globalAlpha = 0.08;
-    context.fillStyle = `rgb(${value}, ${value}, ${value})`;
-    context.fillRect(0, y, width, 1);
-  }
-
-  for (let index = 0; index < 880; index += 1) {
-    const x = seededNoise(index * 4.7) * width;
-    const y = seededNoise(index * 8.9) * height;
-    const length = 48 + seededNoise(index * 3.3) * 140;
-    const drift = (seededNoise(index * 9.1) - 0.5) * 38;
-    const value = Math.round(122 + seededNoise(index * 11.4) * 18);
-
-    context.globalAlpha = 0.03 + seededNoise(index * 2.2) * 0.035;
-    context.strokeStyle = `rgb(${value}, ${value}, ${value})`;
-    context.lineWidth = 0.7 + seededNoise(index * 5.8) * 1.6;
-    context.beginPath();
-    context.moveTo(x, y);
-    context.lineTo(x + drift, y + length);
-    context.stroke();
-  }
-
-  context.restore();
-  texture.needsUpdate = true;
-  qaState.brushStrokes = 0;
-}
-
-function brushVelvet(current, previous) {
-  const context = napTexture.image.getContext("2d");
-  const dx = previous ? current.x - previous.x : 0;
-  const dy = previous ? current.y - previous.y : 0;
-  const distance = previous ? current.distanceTo(previous) : 0;
-  const shade = Math.round(THREE.MathUtils.clamp(132 + dx * 0.68 - dy * 0.3, 48, 224));
-  const alpha = THREE.MathUtils.clamp(0.28 + distance / 230, 0.34, 0.7);
-  const radius = brushSize;
-  const start = previous && distance < 260 ? previous : current;
-
-  context.save();
-  context.globalCompositeOperation = "source-over";
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.shadowColor = `rgba(${shade}, ${shade}, ${shade}, ${alpha * 0.8})`;
-  context.shadowBlur = radius * 0.42;
-
-  for (let pass = 0; pass < 7; pass += 1) {
-    const offset = (pass - 3) * radius * 0.055;
-    const passShade = THREE.MathUtils.clamp(shade + (seededNoise(pass * 19.7 + current.x) - 0.5) * 42, 28, 236);
-
-    context.globalAlpha = alpha * (pass === 3 ? 0.44 : 0.22);
-    context.strokeStyle = `rgb(${passShade}, ${passShade}, ${passShade})`;
-    context.lineWidth = radius * (pass === 3 ? 0.5 : 0.16);
-    context.beginPath();
-    context.moveTo(start.x + offset, start.y - offset * 0.35);
-    context.lineTo(current.x + offset, current.y - offset * 0.35);
-    context.stroke();
-  }
-
-  const gradient = context.createRadialGradient(current.x, current.y, 0, current.x, current.y, radius * 0.96);
-  gradient.addColorStop(0, `rgba(${shade}, ${shade}, ${shade}, ${alpha * 0.52})`);
-  gradient.addColorStop(0.72, `rgba(${shade}, ${shade}, ${shade}, ${alpha * 0.08})`);
-  gradient.addColorStop(1, `rgba(${shade}, ${shade}, ${shade}, 0)`);
-  context.globalAlpha = 1;
-  context.fillStyle = gradient;
-  context.beginPath();
-  context.arc(current.x, current.y, radius * 0.96, 0, Math.PI * 2);
-  context.fill();
-  context.restore();
-
-  napTexture.needsUpdate = true;
-}
-
-function createNoiseTexture() {
-  const size = 512;
-  const noiseCanvas = document.createElement("canvas");
-  const context = noiseCanvas.getContext("2d");
-  const image = context.createImageData(size, size);
-
-  noiseCanvas.width = size;
-  noiseCanvas.height = size;
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const offset = (y * size + x) * 4;
-      const fiber = Math.sin(y * 0.42 + Math.sin(x * 0.018) * 2.5) * 28;
-      const value = 118 + fiber + seededNoise(x * 4.2 + y * 91.7) * 62;
-
-      image.data[offset] = value;
-      image.data[offset + 1] = value;
-      image.data[offset + 2] = value;
-      image.data[offset + 3] = 255;
-    }
-  }
-
-  context.putImageData(image, 0, 0);
-
-  const texture = new THREE.CanvasTexture(noiseCanvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.generateMipmaps = true;
-
-  return texture;
 }
 
 function createCouch() {
   const group = new THREE.Group();
   const couchMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x071a35,
-    roughness: 0.78,
+    color: 0x202938,
+    roughness: 0.82,
     sheen: 1,
-    sheenColor: 0x5ac9ff,
-    sheenRoughness: 0.58,
+    sheenColor: 0x6b6470,
+    sheenRoughness: 0.7,
   });
   const backMaterial = couchMaterial.clone();
   const seat = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.34, 2.2, 18, 4, 8), couchMaterial);
@@ -803,7 +808,7 @@ function createCouch() {
       color: 0x000000,
       depthWrite: false,
       map: shadowTexture,
-      opacity: 0.36,
+      opacity: 0.34,
       transparent: true,
     }),
   );
@@ -824,16 +829,16 @@ function createCouch() {
 
 function createLightRig() {
   const specs = [
-    { color: 0x87d9ff, intensity: 5.2, position: [-3.4, 2.65, 3.8], speed: 0.16 },
-    { color: 0x2e72ff, intensity: 3.8, position: [3.3, 1.1, 2.4], speed: -0.21 },
-    { color: 0x8bfff2, intensity: 2.8, position: [0.4, -2.3, 3.2], speed: 0.12 },
+    { color: 0xffd7aa, intensity: 6.4, position: [-3.2, 2.4, 3.7], speed: 0.11 },
+    { color: 0x64b7ff, intensity: 4.0, position: [2.7, 1.2, 2.7], speed: -0.16 },
+    { color: 0xd7f7ff, intensity: 2.6, position: [0.2, -1.8, 3.2], speed: 0.1 },
   ];
 
-  scene.add(new THREE.AmbientLight(0x243f7c, 0.64));
-  scene.add(new THREE.HemisphereLight(0x9fdfff, 0x030918, 0.7));
+  scene.add(new THREE.AmbientLight(0x3a4052, 0.7));
+  scene.add(new THREE.HemisphereLight(0xbfd5ff, 0x050509, 0.68));
 
   return specs.map((spec) => {
-    const light = new THREE.PointLight(spec.color, spec.intensity, 9, 1.8);
+    const light = new THREE.PointLight(spec.color, spec.intensity, 9, 1.85);
     light.position.fromArray(spec.position);
     scene.add(light);
 
@@ -844,22 +849,18 @@ function createLightRig() {
 function updateLights(elapsed) {
   lightRig.forEach((rig, index) => {
     rig.light.position.set(
-      rig.origin.x + Math.sin(elapsed * rig.speed + index) * 0.36,
-      rig.origin.y + Math.cos(elapsed * rig.speed * 1.4 + index) * 0.22,
-      rig.origin.z + Math.sin(elapsed * rig.speed * 0.8 + index * 2.1) * 0.42,
+      rig.origin.x + Math.sin(elapsed * rig.speed + index) * 0.34,
+      rig.origin.y + Math.cos(elapsed * rig.speed * 1.35 + index) * 0.18,
+      rig.origin.z + Math.sin(elapsed * rig.speed * 0.75 + index * 2.1) * 0.34,
     );
   });
 
-  velvetMaterial.uniforms.lightA.value.copy(lightRig[0].light.position);
-  velvetMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
-  velvetMaterial.uniforms.lightC.value.copy(lightRig[2].light.position);
-  cordMaterial.uniforms.lightA.value.copy(lightRig[0].light.position);
-  cordMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
-  cordMaterial.uniforms.lightC.value.copy(lightRig[2].light.position);
+  fabricMaterial.uniforms.lightA.value.copy(lightRig[0].light.position);
+  fabricMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
 }
 
 function createAmbientDust() {
-  const count = 760;
+  const count = 520;
   const positions = [];
   const colors = [];
 
@@ -869,9 +870,9 @@ function createAmbientDust() {
     const y = -3.5 + seededNoise(index * 3.7) * 7.5;
     const z = -13 + seededNoise(index * 11.4) * 8;
     const color = new THREE.Color().setHSL(
-      0.52 + seededNoise(index * 17.8) * 0.12,
-      0.52,
-      0.38 + seededNoise(index * 4.4) * 0.3,
+      0.58 + seededNoise(index * 17.8) * 0.08,
+      0.32,
+      0.32 + seededNoise(index * 4.4) * 0.28,
     );
 
     positions.push(Math.cos(theta) * radius, y, z + Math.sin(theta) * radius * 0.12);
@@ -887,8 +888,8 @@ function createAmbientDust() {
     new THREE.PointsMaterial({
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.62,
-      size: 0.032,
+      opacity: 0.42,
+      size: 0.03,
       sizeAttenuation: true,
       transparent: true,
       vertexColors: true,
@@ -899,10 +900,10 @@ function createAmbientDust() {
 function createGlowShards() {
   const group = new THREE.Group();
   const texture = createShardTexture();
-  const colors = [0x74cfff, 0x42f0ff, 0x315fff, 0xebfbff];
+  const colors = [0x93cfff, 0xd3e5ff, 0x9ad3ff];
   const shards = [];
 
-  for (let index = 0; index < 34; index += 1) {
+  for (let index = 0; index < 16; index += 1) {
     const material = new THREE.SpriteMaterial({
       blending: THREE.AdditiveBlending,
       color: colors[index % colors.length],
@@ -915,25 +916,25 @@ function createGlowShards() {
     const sprite = new THREE.Sprite(material);
     const side = index % 2 === 0 ? -1 : 1;
     const basePosition = new THREE.Vector3(
-      side * (1.65 + seededNoise(index * 2.7) * 3.25),
-      -1.7 + seededNoise(index * 7.3) * 3.8,
+      side * (1.8 + seededNoise(index * 2.7) * 3.1),
+      -1.55 + seededNoise(index * 7.3) * 3.4,
       -2.65 + seededNoise(index * 5.1) * 2.1,
     );
     const baseScale = new THREE.Vector2(
-      0.42 + seededNoise(index * 8.2) * 0.95,
-      0.012 + seededNoise(index * 3.4) * 0.032,
+      0.42 + seededNoise(index * 8.2) * 0.72,
+      0.01 + seededNoise(index * 3.4) * 0.024,
     );
 
     sprite.position.copy(basePosition);
     sprite.scale.set(baseScale.x, baseScale.y, 1);
     group.add(sprite);
     shards.push({
-      baseOpacity: 0.1 + seededNoise(index * 6.6) * 0.22,
+      baseOpacity: 0.06 + seededNoise(index * 6.6) * 0.12,
       basePosition,
       baseScale,
       phase: seededNoise(index * 11.9) * Math.PI * 2,
       rotation: material.rotation,
-      speed: 0.45 + seededNoise(index * 19.1) * 0.9,
+      speed: 0.35 + seededNoise(index * 19.1) * 0.64,
       sprite,
     });
   }
@@ -942,17 +943,17 @@ function createGlowShards() {
 }
 
 function updateGlowShards(elapsed) {
-  const viewportFade = camera.aspect < 0.75 ? 0.48 : 1;
+  const viewportFade = camera.aspect < 0.75 ? 0.42 : 1;
 
   glowShards.shards.forEach((shard) => {
     const pulse = Math.pow(Math.max(0, Math.sin(elapsed * shard.speed + shard.phase)), 2.5);
 
     shard.sprite.position.set(
-      shard.basePosition.x + Math.sin(elapsed * 0.12 + shard.phase) * 0.24,
-      shard.basePosition.y + Math.cos(elapsed * 0.1 + shard.phase) * 0.16,
+      shard.basePosition.x + Math.sin(elapsed * 0.12 + shard.phase) * 0.22,
+      shard.basePosition.y + Math.cos(elapsed * 0.1 + shard.phase) * 0.14,
       shard.basePosition.z,
     );
-    shard.sprite.material.opacity = (0.02 + pulse * shard.baseOpacity) * viewportFade;
+    shard.sprite.material.opacity = (0.01 + pulse * shard.baseOpacity) * viewportFade;
     shard.sprite.material.rotation = shard.rotation + Math.sin(elapsed * 0.4 + shard.phase) * 0.08;
     shard.sprite.scale.set(
       shard.baseScale.x * (0.86 + pulse * 0.28),
@@ -1008,12 +1009,6 @@ function createShardTexture() {
   return new THREE.CanvasTexture(textureCanvas);
 }
 
-function smoothstep(edge0, edge1, value) {
-  const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
-
-  return t * t * (3 - 2 * t);
-}
-
 function sampleIconOutline(angle) {
   const normalizedAngle = (angle + Math.PI * 2) % (Math.PI * 2);
   const samplePosition = (normalizedAngle / (Math.PI * 2)) * ICON_OUTLINE_SAMPLES.length;
@@ -1026,6 +1021,19 @@ function sampleIconOutline(angle) {
     ICON_OUTLINE_SAMPLES[nextIndex],
     t,
   );
+}
+
+function sampleCushionOutline(angle) {
+  const rawOutline = sampleIconOutline(angle);
+  const outlineDelta = rawOutline - 1;
+
+  return 1 + outlineDelta * (outlineDelta < 0 ? 1.32 : 1.18);
+}
+
+function smoothstep(edge0, edge1, value) {
+  const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+
+  return t * t * (3 - 2 * t);
 }
 
 function seededNoise(seed) {
