@@ -1,6 +1,6 @@
 :root {
-  color-scheme: dark;
-  background: #030711;
+  color-scheme: light;
+  background: #f6f2e9;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -21,10 +21,10 @@ body,
 
 body {
   background:
-    radial-gradient(circle at 48% 24%, rgba(30, 136, 232, 0.34), transparent 31rem),
-    radial-gradient(circle at 14% 78%, rgba(0, 216, 202, 0.18), transparent 26rem),
-    radial-gradient(circle at 85% 72%, rgba(94, 118, 240, 0.2), transparent 28rem),
-    linear-gradient(180deg, #0a1731, #041026 58%, #030712);
+    radial-gradient(circle at 48% 18%, rgba(255, 255, 255, 0.95), transparent 31rem),
+    radial-gradient(circle at 18% 82%, rgba(196, 222, 255, 0.32), transparent 27rem),
+    radial-gradient(circle at 88% 74%, rgba(152, 185, 228, 0.24), transparent 29rem),
+    linear-gradient(180deg, #fbf8f0, #f2eee5 58%, #e8e5df);
 }
 
 #app {
@@ -49,17 +49,17 @@ body {
 
 #app::before {
   background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+    linear-gradient(rgba(63, 77, 95, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 77, 95, 0.026) 1px, transparent 1px);
   background-size: 46px 46px;
   mask-image: radial-gradient(circle at center, transparent 20%, black 100%);
-  opacity: 0.22;
+  opacity: 0.28;
 }
 
 #app::after {
   background:
-    radial-gradient(circle at 50% 42%, transparent 48%, rgba(0, 0, 0, 0.26) 100%),
-    linear-gradient(180deg, rgba(2, 9, 24, 0), rgba(2, 4, 12, 0.24));
+    radial-gradient(circle at 50% 42%, transparent 52%, rgba(96, 89, 77, 0.12) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(112, 100, 82, 0.12));
   mix-blend-mode: multiply;
 }
 

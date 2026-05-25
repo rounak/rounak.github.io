@@ -13,13 +13,13 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.58;
-renderer.setClearColor(0x071126, 1);
+renderer.toneMappingExposure = 1.46;
+renderer.setClearColor(0xf6f2e9, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x071126);
-scene.fog = new THREE.FogExp2(0x08142a, 0.024);
+scene.background = new THREE.Color(0xf6f2e9);
+scene.fog = new THREE.FogExp2(0xf1ede4, 0.014);
 
 const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 80);
 camera.position.set(0, 0.1, 5.35);
@@ -1165,14 +1165,14 @@ function createSequinMaterial() {
 
 function createGlyphMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    clearcoat: 0.42,
-    clearcoatRoughness: 0.28,
-    color: 0xd7f4fb,
-    emissive: 0x174f72,
-    emissiveIntensity: 0.18,
-    metalness: 0.04,
-    reflectivity: 0.36,
-    roughness: 0.42,
+    clearcoat: 0.62,
+    clearcoatRoughness: 0.18,
+    color: 0xf8fdff,
+    emissive: 0xbcefff,
+    emissiveIntensity: 0.14,
+    metalness: 0.02,
+    reflectivity: 0.48,
+    roughness: 0.28,
   });
 }
 
@@ -1180,11 +1180,11 @@ function createGlyphShadowMaterial() {
   return new THREE.MeshPhysicalMaterial({
     clearcoat: 0.12,
     clearcoatRoughness: 0.58,
-    color: 0x1d6798,
-    emissive: 0x08243d,
-    emissiveIntensity: 0.12,
+    color: 0x8fd6ee,
+    emissive: 0x1f6d9b,
+    emissiveIntensity: 0.08,
     metalness: 0,
-    opacity: 0.68,
+    opacity: 0.46,
     roughness: 0.72,
     transparent: true,
   });
@@ -1193,11 +1193,11 @@ function createGlyphShadowMaterial() {
 function createCouch() {
   const group = new THREE.Group();
   const couchMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x2b3443,
-    roughness: 0.82,
+    color: 0xd7dce1,
+    roughness: 0.76,
     sheen: 1,
-    sheenColor: 0x7a7480,
-    sheenRoughness: 0.7,
+    sheenColor: 0xf6f2e8,
+    sheenRoughness: 0.64,
   });
   const backMaterial = couchMaterial.clone();
   const seat = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.34, 2.2, 18, 4, 8), couchMaterial);
@@ -1209,7 +1209,7 @@ function createCouch() {
       color: 0x000000,
       depthWrite: false,
       map: shadowTexture,
-      opacity: 0.52,
+      opacity: 0.22,
       transparent: true,
     }),
   );
@@ -1218,7 +1218,7 @@ function createCouch() {
       color: 0x000000,
       depthWrite: false,
       map: shadowTexture,
-      opacity: 0.5,
+      opacity: 0.3,
       transparent: true,
     }),
   );
@@ -1241,13 +1241,13 @@ function createCouch() {
 
 function createLightRig() {
   const specs = [
-    { color: 0xffd7aa, intensity: 6.4, position: [-3.2, 2.4, 3.7], speed: 0.11 },
-    { color: 0x64b7ff, intensity: 4.0, position: [2.7, 1.2, 2.7], speed: -0.16 },
-    { color: 0xd7f7ff, intensity: 2.6, position: [0.2, -1.8, 3.2], speed: 0.1 },
+    { color: 0xffe7c8, intensity: 5.4, position: [-3.2, 2.4, 3.7], speed: 0.11 },
+    { color: 0x8ed2ff, intensity: 4.5, position: [2.7, 1.2, 2.7], speed: -0.16 },
+    { color: 0xffffff, intensity: 2.9, position: [0.2, -1.8, 3.2], speed: 0.1 },
   ];
 
-  scene.add(new THREE.AmbientLight(0x3a4052, 0.7));
-  scene.add(new THREE.HemisphereLight(0xbfd5ff, 0x050509, 0.68));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.76));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xcac4b7, 0.82));
 
   return specs.map((spec) => {
     const light = new THREE.PointLight(spec.color, spec.intensity, 9, 1.85);
