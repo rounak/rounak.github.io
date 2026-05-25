@@ -340,11 +340,11 @@ function createCushionGeometry() {
 function cushionPointFromDirection(direction, offset = 0) {
   const radius = cushionRadius(direction) + offset;
 
-  return applyCouchContact(new THREE.Vector3(
+  return new THREE.Vector3(
     direction.x * radius,
     direction.y * radius,
     direction.z * radius * PILLOW_DEPTH_SCALE,
-  ));
+  );
 }
 
 function cushionRadius(direction) {
@@ -363,18 +363,6 @@ function cushionRadius(direction) {
     + clothIrregularity;
 }
 
-function applyCouchContact(point) {
-  const contact = smoothstep(0.74 * PILLOW_SCALE, 1.08 * PILLOW_SCALE, -point.y);
-
-  if (contact > 0) {
-    point.y += contact * 0.135;
-    point.z *= 1 - contact * 0.09;
-    point.z -= contact * 0.04;
-  }
-
-  return point;
-}
-
 function cushionSurfacePointFromXY(x, y, side = FRONT_SIDE, offset = 0) {
   const planarRadius = Math.hypot(x, y);
   let unscaledZ = Math.sqrt(Math.max(0, Math.pow(PILLOW_SCALE * 1.08, 2) - planarRadius * planarRadius));
@@ -387,7 +375,7 @@ function cushionSurfacePointFromXY(x, y, side = FRONT_SIDE, offset = 0) {
     unscaledZ = Math.sqrt(Math.max(0, radius * radius - planarRadius * planarRadius));
   }
 
-  return applyCouchContact(new THREE.Vector3(x, y, side * unscaledZ * PILLOW_DEPTH_SCALE));
+  return new THREE.Vector3(x, y, side * unscaledZ * PILLOW_DEPTH_SCALE);
 }
 
 function cushionNormalFromXY(x, y, side = FRONT_SIDE) {
