@@ -1,7 +1,6 @@
 import * as THREE from "../../codex-disco-render/lib/three.module.min.js";
 
 const canvas = document.querySelector("#scene");
-const toggleButton = document.querySelector("#toggle-motion");
 const resetButton = document.querySelector("#reset-nap");
 const brushSizeInput = document.querySelector("#brush-size");
 
@@ -27,7 +26,6 @@ camera.position.set(0, 0.1, 5.35);
 const pointer = new THREE.Vector2();
 const pointerNdc = new THREE.Vector2(10, 10);
 const raycaster = new THREE.Raycaster();
-const startTime = performance.now();
 const qaState = {
   brushStrokes: 0,
   flippedSequins: 0,
@@ -71,40 +69,27 @@ const glyphShadowMaterial = createGlyphShadowMaterial();
 const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
-pillowGroup.rotation.set(-0.08, -0.24, 0.025);
-pillowGroup.position.set(0, -0.12, -0.18);
+pillowGroup.rotation.set(-0.07, -0.12, 0.018);
+pillowGroup.position.set(0, -0.08, -0.18);
 scene.add(pillowGroup);
 
 const pillow = createPillow();
-const couch = createCouch();
-const ambientDust = createAmbientDust();
-const glowShards = createGlowShards();
+const contactShadow = createContactShadow(shadowTexture);
 const lightRig = createLightRig();
 
 pillowGroup.add(pillow.group);
-scene.add(couch);
-scene.add(ambientDust);
-scene.add(glowShards.group);
+scene.add(contactShadow);
+updateLights(0);
 
 const brushTargets = pillow.brushTargets;
 qaState.pillowVertices = pillow.vertexCount;
 qaState.sequinCount = pillow.sequins.count;
 
-let paused = false;
 let brushSize = Number.parseFloat(brushSizeInput.value);
 let firstFrame = true;
-let lastFrameTime = performance.now();
 let activePointerId = null;
 let lastBrushLocalPoint = null;
-let presentationTime = 0;
 let hoverFade = 0;
-
-toggleButton.addEventListener("click", () => {
-  paused = !paused;
-  toggleButton.classList.toggle("is-paused", paused);
-  toggleButton.setAttribute("aria-label", paused ? "Resume motion" : "Pause motion");
-  toggleButton.setAttribute("title", paused ? "Resume motion" : "Pause motion");
-});
 
 resetButton.addEventListener("click", () => {
   pillow.sequins.reset();
@@ -167,30 +152,7 @@ animate();
 function animate() {
   requestAnimationFrame(animate);
 
-  const now = performance.now();
-  const delta = Math.min((now - lastFrameTime) / 1000, 0.033);
-  const elapsed = (now - startTime) / 1000;
-  lastFrameTime = now;
-
-  if (!paused && activePointerId === null) {
-    presentationTime += delta;
-  }
-
-  const targetY = -0.24 + presentationTime * 0.46 + pointer.x * 0.1;
-
-  pillowGroup.rotation.x += (-0.07 - pointer.y * 0.035 - pillowGroup.rotation.x) * 0.04;
-  if (activePointerId === null) {
-    pillowGroup.rotation.y += (targetY - pillowGroup.rotation.y) * 0.08;
-  }
-  pillowGroup.rotation.z += ((0.025 + pointer.x * 0.018) - pillowGroup.rotation.z) * 0.03;
-  pillow.group.position.y = Math.sin(presentationTime * 0.82) * 0.018;
-
-  fabricMaterial.uniforms.time.value = elapsed;
   fabricMaterial.uniforms.hover.value += (hoverFade - fabricMaterial.uniforms.hover.value) * 0.08;
-  sequinMaterial.uniforms.time.value = elapsed;
-  updateLights(elapsed);
-  updateGlowShards(elapsed);
-  ambientDust.rotation.y = elapsed * 0.008;
 
   renderer.render(scene, camera);
 
@@ -1190,53 +1152,22 @@ function createGlyphShadowMaterial() {
   });
 }
 
-function createCouch() {
-  const group = new THREE.Group();
-  const couchMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xd7dce1,
-    roughness: 0.76,
-    sheen: 1,
-    sheenColor: 0xf6f2e8,
-    sheenRoughness: 0.64,
-  });
-  const backMaterial = couchMaterial.clone();
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.34, 2.2, 18, 4, 8), couchMaterial);
-  const back = new THREE.Mesh(new THREE.BoxGeometry(6.5, 1.72, 0.34, 18, 12, 4), backMaterial);
-  const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.48, 1.05, 2.1, 4, 8, 8), couchMaterial.clone());
-  const rightArm = leftArm.clone();
+function createContactShadow(texture) {
   const shadow = new THREE.Sprite(
     new THREE.SpriteMaterial({
-      color: 0x000000,
+      color: 0x5e6672,
       depthWrite: false,
-      map: shadowTexture,
-      opacity: 0.22,
-      transparent: true,
-    }),
-  );
-  const contactShadow = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      color: 0x000000,
-      depthWrite: false,
-      map: shadowTexture,
-      opacity: 0.3,
+      map: texture,
+      opacity: 0.2,
       transparent: true,
     }),
   );
 
-  seat.position.set(0, -1.34, -0.72);
-  seat.rotation.x = -0.03;
-  back.position.set(0, -0.66, -1.72);
-  back.rotation.x = 0.08;
-  leftArm.position.set(-3.08, -0.92, -0.7);
-  rightArm.position.set(3.08, -0.92, -0.7);
-  shadow.position.set(0, -1.02, 0.16);
-  shadow.scale.set(3.16, 0.86, 1);
-  contactShadow.position.set(0, -0.98, 0.38);
-  contactShadow.scale.set(2.15, 0.42, 1);
+  shadow.position.set(0, -1.07, 0.16);
+  shadow.scale.set(2.58, 0.54, 1);
+  shadow.renderOrder = -2;
 
-  group.add(back, seat, leftArm, rightArm, shadow, contactShadow);
-
-  return group;
+  return shadow;
 }
 
 function createLightRig() {
@@ -1273,110 +1204,6 @@ function updateLights(elapsed) {
   sequinMaterial.uniforms.lightB.value.copy(lightRig[1].light.position);
 }
 
-function createAmbientDust() {
-  const count = 520;
-  const positions = [];
-  const colors = [];
-
-  for (let index = 0; index < count; index += 1) {
-    const radius = 7 + seededNoise(index * 2.1) * 18;
-    const theta = seededNoise(index * 5.3) * Math.PI * 2;
-    const y = -3.5 + seededNoise(index * 3.7) * 7.5;
-    const z = -13 + seededNoise(index * 11.4) * 8;
-    const color = new THREE.Color().setHSL(
-      0.58 + seededNoise(index * 17.8) * 0.08,
-      0.32,
-      0.32 + seededNoise(index * 4.4) * 0.28,
-    );
-
-    positions.push(Math.cos(theta) * radius, y, z + Math.sin(theta) * radius * 0.12);
-    colors.push(color.r, color.g, color.b);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-
-  return new THREE.Points(
-    geometry,
-    new THREE.PointsMaterial({
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      opacity: 0.42,
-      size: 0.03,
-      sizeAttenuation: true,
-      transparent: true,
-      vertexColors: true,
-    }),
-  );
-}
-
-function createGlowShards() {
-  const group = new THREE.Group();
-  const texture = createShardTexture();
-  const colors = [0x93cfff, 0xd3e5ff, 0x9ad3ff];
-  const shards = [];
-
-  for (let index = 0; index < 16; index += 1) {
-    const material = new THREE.SpriteMaterial({
-      blending: THREE.AdditiveBlending,
-      color: colors[index % colors.length],
-      depthWrite: false,
-      map: texture,
-      opacity: 0,
-      rotation: seededNoise(index * 7.4) * Math.PI,
-      transparent: true,
-    });
-    const sprite = new THREE.Sprite(material);
-    const side = index % 2 === 0 ? -1 : 1;
-    const basePosition = new THREE.Vector3(
-      side * (1.8 + seededNoise(index * 2.7) * 3.1),
-      -1.55 + seededNoise(index * 7.3) * 3.4,
-      -2.65 + seededNoise(index * 5.1) * 2.1,
-    );
-    const baseScale = new THREE.Vector2(
-      0.42 + seededNoise(index * 8.2) * 0.72,
-      0.01 + seededNoise(index * 3.4) * 0.024,
-    );
-
-    sprite.position.copy(basePosition);
-    sprite.scale.set(baseScale.x, baseScale.y, 1);
-    group.add(sprite);
-    shards.push({
-      baseOpacity: 0.06 + seededNoise(index * 6.6) * 0.12,
-      basePosition,
-      baseScale,
-      phase: seededNoise(index * 11.9) * Math.PI * 2,
-      rotation: material.rotation,
-      speed: 0.35 + seededNoise(index * 19.1) * 0.64,
-      sprite,
-    });
-  }
-
-  return { group, shards };
-}
-
-function updateGlowShards(elapsed) {
-  const viewportFade = camera.aspect < 0.75 ? 0.42 : 1;
-
-  glowShards.shards.forEach((shard) => {
-    const pulse = Math.pow(Math.max(0, Math.sin(elapsed * shard.speed + shard.phase)), 2.5);
-
-    shard.sprite.position.set(
-      shard.basePosition.x + Math.sin(elapsed * 0.12 + shard.phase) * 0.22,
-      shard.basePosition.y + Math.cos(elapsed * 0.1 + shard.phase) * 0.14,
-      shard.basePosition.z,
-    );
-    shard.sprite.material.opacity = (0.01 + pulse * shard.baseOpacity) * viewportFade;
-    shard.sprite.material.rotation = shard.rotation + Math.sin(elapsed * 0.4 + shard.phase) * 0.08;
-    shard.sprite.scale.set(
-      shard.baseScale.x * (0.86 + pulse * 0.28),
-      shard.baseScale.y * (0.8 + pulse * 0.52),
-      1,
-    );
-  });
-}
-
 function createShadowTexture() {
   const textureCanvas = document.createElement("canvas");
   const size = 512;
@@ -1391,34 +1218,6 @@ function createShadowTexture() {
   gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
   context.fillStyle = gradient;
   context.fillRect(0, 0, size, size);
-
-  return new THREE.CanvasTexture(textureCanvas);
-}
-
-function createShardTexture() {
-  const textureCanvas = document.createElement("canvas");
-  const width = 512;
-  const height = 64;
-  const context = textureCanvas.getContext("2d");
-
-  textureCanvas.width = width;
-  textureCanvas.height = height;
-
-  const gradient = context.createLinearGradient(0, height / 2, width, height / 2);
-  gradient.addColorStop(0, "rgba(255, 255, 255, 0)");
-  gradient.addColorStop(0.45, "rgba(255, 255, 255, 0.7)");
-  gradient.addColorStop(0.55, "rgba(255, 255, 255, 0.7)");
-  gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, width, height);
-
-  const vertical = context.createLinearGradient(0, 0, 0, height);
-  vertical.addColorStop(0, "rgba(255, 255, 255, 0)");
-  vertical.addColorStop(0.5, "rgba(255, 255, 255, 1)");
-  vertical.addColorStop(1, "rgba(255, 255, 255, 0)");
-  context.globalCompositeOperation = "destination-in";
-  context.fillStyle = vertical;
-  context.fillRect(0, 0, width, height);
 
   return new THREE.CanvasTexture(textureCanvas);
 }

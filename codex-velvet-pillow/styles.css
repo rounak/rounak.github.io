@@ -72,12 +72,12 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid rgba(190, 221, 255, 0.18);
+  border: 1px solid rgba(91, 111, 139, 0.2);
   border-radius: 999px;
-  background: rgba(4, 12, 28, 0.52);
+  background: rgba(255, 255, 255, 0.64);
   box-shadow:
-    0 20px 70px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    0 18px 56px rgba(68, 75, 85, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.74);
   backdrop-filter: blur(18px);
 }
 
@@ -116,18 +116,6 @@ body {
   width: 21px;
   height: 21px;
   fill: currentColor;
-}
-
-.icon-button .play-icon {
-  display: none;
-}
-
-.icon-button.is-paused .pause-icon {
-  display: none;
-}
-
-.icon-button.is-paused .play-icon {
-  display: block;
 }
 
 .brush-size {
