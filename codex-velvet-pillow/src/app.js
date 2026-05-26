@@ -60,6 +60,14 @@ const MIN_BRUSH_RADIUS = 0.1;
 const MAX_BRUSH_RADIUS = 0.28;
 const MIN_BRUSH_TRAVEL = 0.018;
 const FRONT_SIDE = 1;
+const IDLE_ROTATION_CENTER_Y = -0.12;
+const IDLE_ROTATION_AMPLITUDE = THREE.MathUtils.degToRad(22);
+const IDLE_ROTATION_SPEED = 0.42;
+const IDLE_RESUME_DELAY_MS = 1200;
+const HOVER_ROTATION_X = THREE.MathUtils.degToRad(1.7);
+const HOVER_ROTATION_Y = THREE.MathUtils.degToRad(3.2);
+const HOVER_ROTATION_Z = THREE.MathUtils.degToRad(1.2);
+const supportsHoverParallax = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
 const fabricMaterial = createFabricMaterial();
 const seamMaterial = createSeamMaterial();
@@ -69,7 +77,7 @@ const glyphShadowMaterial = createGlyphShadowMaterial();
 const shadowTexture = createShadowTexture();
 
 const pillowGroup = new THREE.Group();
-pillowGroup.rotation.set(-0.07, -0.12, 0.018);
+pillowGroup.rotation.set(-0.07, IDLE_ROTATION_CENTER_Y, 0.018);
 pillowGroup.position.set(0, -0.08, -0.18);
 scene.add(pillowGroup);
 
@@ -87,6 +95,10 @@ qaState.sequinCount = pillow.sequins.count;
 
 let brushSize = Number.parseFloat(brushSizeInput.value);
 let firstFrame = true;
+let idleResumeAt = performance.now() + 400;
+let idleRotationTime = 0;
+let isPointerOverCanvas = false;
+let lastFrameTime = performance.now();
 let activePointerId = null;
 let lastBrushLocalPoint = null;
 let hoverFade = 0;
@@ -103,6 +115,8 @@ brushSizeInput.addEventListener("input", () => {
 
 canvas.addEventListener("pointerdown", (event) => {
   activePointerId = event.pointerId;
+  idleResumeAt = Number.POSITIVE_INFINITY;
+  isPointerOverCanvas = true;
   lastBrushLocalPoint = null;
   try {
     canvas.setPointerCapture(event.pointerId);
@@ -125,8 +139,7 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerup", (event) => {
   if (activePointerId === event.pointerId) {
-    activePointerId = null;
-    lastBrushLocalPoint = null;
+    finishPointerInteraction();
   }
 
   if (canvas.hasPointerCapture(event.pointerId)) {
@@ -135,11 +148,12 @@ canvas.addEventListener("pointerup", (event) => {
 });
 
 canvas.addEventListener("pointercancel", () => {
-  activePointerId = null;
-  lastBrushLocalPoint = null;
+  finishPointerInteraction();
 });
 
 canvas.addEventListener("pointerleave", () => {
+  isPointerOverCanvas = false;
+  pointer.set(0, 0);
   pointerNdc.set(10, 10);
   hoverFade = 0;
   lastBrushLocalPoint = null;
@@ -151,6 +165,29 @@ animate();
 
 function animate() {
   requestAnimationFrame(animate);
+
+  const now = performance.now();
+  const delta = Math.min((now - lastFrameTime) / 1000, 0.033);
+  const idleMotionActive = activePointerId === null && now >= idleResumeAt;
+
+  lastFrameTime = now;
+
+  if (idleMotionActive) {
+    idleRotationTime += delta;
+  }
+
+  const hoverInfluence = idleMotionActive && supportsHoverParallax && isPointerOverCanvas ? 1 : 0;
+  const targetRotationX = -0.07 - pointer.y * HOVER_ROTATION_X * hoverInfluence;
+  const targetRotationY = IDLE_ROTATION_CENTER_Y
+    + Math.sin(idleRotationTime * IDLE_ROTATION_SPEED) * IDLE_ROTATION_AMPLITUDE
+    + pointer.x * HOVER_ROTATION_Y * hoverInfluence;
+  const targetRotationZ = 0.018 + pointer.x * HOVER_ROTATION_Z * hoverInfluence;
+
+  if (idleMotionActive) {
+    pillowGroup.rotation.x += (targetRotationX - pillowGroup.rotation.x) * 0.045;
+    pillowGroup.rotation.y += (targetRotationY - pillowGroup.rotation.y) * 0.055;
+    pillowGroup.rotation.z += (targetRotationZ - pillowGroup.rotation.z) * 0.04;
+  }
 
   fabricMaterial.uniforms.hover.value += (hoverFade - fabricMaterial.uniforms.hover.value) * 0.08;
 
@@ -180,6 +217,13 @@ function updatePointer(event) {
 
   pointer.set((x - 0.5) * 2, (y - 0.5) * 2);
   pointerNdc.set(pointer.x, -pointer.y);
+  isPointerOverCanvas = true;
+}
+
+function finishPointerInteraction() {
+  activePointerId = null;
+  lastBrushLocalPoint = null;
+  idleResumeAt = performance.now() + IDLE_RESUME_DELAY_MS;
 }
 
 function reverseSequinsFromPointer(event) {
