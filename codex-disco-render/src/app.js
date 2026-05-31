@@ -12,7 +12,7 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.04;
+renderer.toneMappingExposure = 0.78;
 renderer.setClearColor(0x02020a, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -37,6 +37,7 @@ const qaState = {
   tileCount: 0,
   animatedTileColor: [0, 0, 0],
   environmentMap: "",
+  toneMappingExposure: renderer.toneMappingExposure,
 };
 
 window.__discoQA = qaState;
@@ -72,7 +73,7 @@ const MAX_INTERACTION_VELOCITY = 5.4;
 const environmentTexture = createEnvironmentMap();
 scene.environment = environmentTexture;
 
-scene.add(new THREE.AmbientLight(0x28329d, 0.58));
+scene.add(new THREE.AmbientLight(0x242a8c, 0.48));
 
 const ballGroup = new THREE.Group();
 ballGroup.rotation.set(HINGE_ROTATION_X, -0.4, HINGE_ROTATION_Z);
@@ -191,6 +192,7 @@ function animate() {
   canvas.dataset.tileCount = String(qaState.tileCount);
   canvas.dataset.animatedTileColor = qaState.animatedTileColor.join(",");
   canvas.dataset.environmentMap = qaState.environmentMap;
+  canvas.dataset.toneMappingExposure = String(qaState.toneMappingExposure);
 }
 
 function applyAngularVelocity(delta) {
@@ -364,13 +366,13 @@ function createCodexDiscoTiles() {
   geometry.computeBoundingSphere();
 
   const material = new THREE.MeshPhysicalMaterial({
-    clearcoat: 1,
-    clearcoatRoughness: 0.14,
+    clearcoat: 0.58,
+    clearcoatRoughness: 0.26,
     envMap: environmentTexture,
-    envMapIntensity: 2.65,
-    metalness: 1,
-    reflectivity: 1,
-    roughness: 0.16,
+    envMapIntensity: 1.18,
+    metalness: 0.82,
+    reflectivity: 0.72,
+    roughness: 0.24,
     side: THREE.DoubleSide,
     vertexColors: true,
   });
@@ -405,7 +407,7 @@ function updateTileReflections(elapsed) {
 
     finalColor
       .copy(tile.baseColor)
-      .multiplyScalar(0.46 + rim + pulse);
+      .multiplyScalar(0.66 + rim * 0.72 + pulse);
 
     lightRig.forEach((rig) => {
       lightDirection.copy(rig.light.position).sub(worldCenter).normalize();
@@ -417,16 +419,17 @@ function updateTileReflections(elapsed) {
         Math.max(0, Math.sin(elapsed * rig.flicker + tile.phase + tileIndex * 0.017)),
         8,
       );
-      const contribution = sparkle * rig.specular + diffuse * 0.13 + passingBeam * 0.04;
+      const contribution = sparkle * rig.specular + diffuse * 0.1 + passingBeam * 0.035;
 
       finalColor.r += rig.color.r * contribution;
       finalColor.g += rig.color.g * contribution;
       finalColor.b += rig.color.b * contribution;
     });
 
-    finalColor.r = Math.min(finalColor.r, 1.32);
-    finalColor.g = Math.min(finalColor.g, 1.32);
-    finalColor.b = Math.min(finalColor.b, 1.42);
+    finalColor.lerp(tile.baseColor, 0.16);
+    finalColor.r = Math.min(finalColor.r, 0.98);
+    finalColor.g = Math.min(finalColor.g, 0.96);
+    finalColor.b = Math.min(finalColor.b, 1.08);
 
     for (let vertex = 0; vertex < 6; vertex += 1) {
       const offset = tile.colorOffset + vertex * 3;
@@ -485,9 +488,9 @@ function createCoreSurface() {
       clearcoatRoughness: 0.2,
       color: 0x05074a,
       envMap: environmentTexture,
-      envMapIntensity: 1.15,
+      envMapIntensity: 0.82,
       metalness: 0.64,
-      roughness: 0.34,
+      roughness: 0.42,
     }),
   );
 }
@@ -617,20 +620,20 @@ function createPromptGlyph() {
   });
   const faceSheenMaterial = new THREE.MeshBasicMaterial({
     blending: THREE.AdditiveBlending,
-    color: 0xeaf3ff,
+    color: 0xbfd9ff,
     depthWrite: false,
-    opacity: 0.28,
+    opacity: 0.18,
     side: THREE.DoubleSide,
     transparent: true,
   });
   const faceMaterial = new THREE.MeshPhysicalMaterial({
     clearcoat: 1,
     clearcoatRoughness: 0.015,
-    color: 0xf7fbff,
-    emissive: 0xbfdcff,
-    emissiveIntensity: 3.15,
+    color: 0xcfe2ff,
+    emissive: 0x78a5ff,
+    emissiveIntensity: 1.9,
     envMap: environmentTexture,
-    envMapIntensity: 4.8,
+    envMapIntensity: 2.85,
     ior: 1.62,
     iridescence: 0.42,
     iridescenceIOR: 1.35,
@@ -638,7 +641,7 @@ function createPromptGlyph() {
     reflectivity: 1,
     roughness: 0.035,
     specularColor: 0xffffff,
-    specularIntensity: 1,
+    specularIntensity: 0.82,
     side: THREE.DoubleSide,
     thickness: 0.34,
     transmission: 0,
@@ -946,16 +949,16 @@ function updateCausticShards(elapsed) {
 
 function createDiscoLights() {
   const specs = [
-    { color: 0x7c58ff, flicker: 2.8, phase: 0.2, radius: 3.8, shininess: 68, specular: 1.08, speed: 0.68, y: 1.9 },
-    { color: 0x22d7ff, flicker: 3.4, phase: 2.3, radius: 4.3, shininess: 74, specular: 1.0, speed: -0.52, y: -0.7 },
-    { color: 0xff4cc8, flicker: 3.1, phase: 4.1, radius: 3.4, shininess: 62, specular: 0.95, speed: 0.76, y: 0.78 },
-    { color: 0xf6f5ff, flicker: 4.2, phase: 5.8, radius: 4.7, shininess: 90, specular: 0.72, speed: -0.35, y: 1.18 },
+    { color: 0x7654ff, flicker: 2.8, phase: 0.2, radius: 3.8, shininess: 68, specular: 0.72, speed: 0.68, y: 1.9 },
+    { color: 0x1fcaff, flicker: 3.4, phase: 2.3, radius: 4.3, shininess: 74, specular: 0.68, speed: -0.52, y: -0.7 },
+    { color: 0xf43ac2, flicker: 3.1, phase: 4.1, radius: 3.4, shininess: 62, specular: 0.64, speed: 0.76, y: 0.78 },
+    { color: 0x9ebcff, flicker: 4.2, phase: 5.8, radius: 4.7, shininess: 90, specular: 0.28, speed: -0.35, y: 1.18 },
   ];
   const starTexture = createStarTexture();
 
   return specs.map((spec) => {
     const color = new THREE.Color(spec.color);
-    const light = new THREE.PointLight(color, 16, 8.5, 1.7);
+    const light = new THREE.PointLight(color, 11, 8.5, 1.7);
     const sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         blending: THREE.AdditiveBlending,
@@ -1097,11 +1100,11 @@ function createHdrEnvironmentTexture() {
   const height = 256;
   const data = new Float32Array(width * height * 4);
   const lightDomes = [
-    { color: [5.8, 3.9, 10.4], radius: 0.105, stretch: 0.72, u: 0.09, v: 0.22 },
-    { color: [0.9, 8.2, 10.8], radius: 0.13, stretch: 0.55, u: 0.34, v: 0.34 },
-    { color: [9.6, 1.2, 5.6], radius: 0.12, stretch: 0.62, u: 0.63, v: 0.19 },
-    { color: [8.0, 6.8, 4.9], radius: 0.066, stretch: 0.5, u: 0.86, v: 0.43 },
-    { color: [1.6, 2.8, 9.2], radius: 0.16, stretch: 0.78, u: 0.72, v: 0.72 },
+    { color: [2.7, 1.5, 5.4], radius: 0.105, stretch: 0.72, u: 0.09, v: 0.22 },
+    { color: [0.35, 3.8, 5.7], radius: 0.13, stretch: 0.55, u: 0.34, v: 0.34 },
+    { color: [4.4, 0.35, 2.7], radius: 0.12, stretch: 0.62, u: 0.63, v: 0.19 },
+    { color: [2.1, 1.25, 4.2], radius: 0.066, stretch: 0.5, u: 0.86, v: 0.43 },
+    { color: [0.55, 1.1, 4.7], radius: 0.16, stretch: 0.78, u: 0.72, v: 0.72 },
   ];
 
   for (let y = 0; y < height; y += 1) {
@@ -1119,9 +1122,9 @@ function createHdrEnvironmentTexture() {
       let green = 0.018 + horizon * 0.085 + ceilingGlow * 0.018 + floorGlow * 0.024;
       let blue = 0.05 + horizon * 0.24 + ceilingGlow * 0.12 + floorGlow * 0.06;
 
-      red += sweep * 0.58 + oppositeSweep * 0.08;
-      green += sweep * 0.1 + oppositeSweep * 0.42;
-      blue += sweep * 1.05 + oppositeSweep * 0.82;
+      red += sweep * 0.32 + oppositeSweep * 0.05;
+      green += sweep * 0.06 + oppositeSweep * 0.24;
+      blue += sweep * 0.72 + oppositeSweep * 0.48;
 
       lightDomes.forEach((light) => {
         const du = Math.min(Math.abs(u - light.u), 1 - Math.abs(u - light.u));
