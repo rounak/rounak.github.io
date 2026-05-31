@@ -12,7 +12,7 @@ const renderer = new THREE.WebGLRenderer({
 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.28;
+renderer.toneMappingExposure = 1.04;
 renderer.setClearColor(0x02020a, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -72,7 +72,7 @@ const MAX_INTERACTION_VELOCITY = 5.4;
 const environmentTexture = createEnvironmentMap();
 scene.environment = environmentTexture;
 
-scene.add(new THREE.AmbientLight(0x2a35a5, 0.72));
+scene.add(new THREE.AmbientLight(0x28329d, 0.58));
 
 const ballGroup = new THREE.Group();
 ballGroup.rotation.set(HINGE_ROTATION_X, -0.4, HINGE_ROTATION_Z);
@@ -367,7 +367,7 @@ function createCodexDiscoTiles() {
     clearcoat: 1,
     clearcoatRoughness: 0.14,
     envMap: environmentTexture,
-    envMapIntensity: 4.35,
+    envMapIntensity: 2.65,
     metalness: 1,
     reflectivity: 1,
     roughness: 0.16,
@@ -424,9 +424,9 @@ function updateTileReflections(elapsed) {
       finalColor.b += rig.color.b * contribution;
     });
 
-    finalColor.r = Math.min(finalColor.r, 1.8);
-    finalColor.g = Math.min(finalColor.g, 1.8);
-    finalColor.b = Math.min(finalColor.b, 1.8);
+    finalColor.r = Math.min(finalColor.r, 1.32);
+    finalColor.g = Math.min(finalColor.g, 1.32);
+    finalColor.b = Math.min(finalColor.b, 1.42);
 
     for (let vertex = 0; vertex < 6; vertex += 1) {
       const offset = tile.colorOffset + vertex * 3;
@@ -485,7 +485,7 @@ function createCoreSurface() {
       clearcoatRoughness: 0.2,
       color: 0x05074a,
       envMap: environmentTexture,
-      envMapIntensity: 1.55,
+      envMapIntensity: 1.15,
       metalness: 0.64,
       roughness: 0.34,
     }),
@@ -602,7 +602,7 @@ function createPromptGlyph() {
     emissive: 0x0a0f46,
     emissiveIntensity: 0.7,
     envMap: environmentTexture,
-    envMapIntensity: 2.35,
+    envMapIntensity: 1.55,
     metalness: 0.55,
     roughness: 0.28,
     side: THREE.DoubleSide,
@@ -630,7 +630,7 @@ function createPromptGlyph() {
     emissive: 0xbfdcff,
     emissiveIntensity: 3.15,
     envMap: environmentTexture,
-    envMapIntensity: 7.4,
+    envMapIntensity: 4.8,
     ior: 1.62,
     iridescence: 0.42,
     iridescenceIOR: 1.35,
@@ -1097,11 +1097,11 @@ function createHdrEnvironmentTexture() {
   const height = 256;
   const data = new Float32Array(width * height * 4);
   const lightDomes = [
-    { color: [15.5, 12.0, 23.0], radius: 0.105, stretch: 0.72, u: 0.09, v: 0.22 },
-    { color: [3.2, 18.5, 24.0], radius: 0.13, stretch: 0.55, u: 0.34, v: 0.34 },
-    { color: [19.5, 3.6, 14.0], radius: 0.12, stretch: 0.62, u: 0.63, v: 0.19 },
-    { color: [24.0, 23.0, 20.0], radius: 0.072, stretch: 0.5, u: 0.86, v: 0.43 },
-    { color: [5.0, 7.5, 25.0], radius: 0.16, stretch: 0.78, u: 0.72, v: 0.72 },
+    { color: [5.8, 3.9, 10.4], radius: 0.105, stretch: 0.72, u: 0.09, v: 0.22 },
+    { color: [0.9, 8.2, 10.8], radius: 0.13, stretch: 0.55, u: 0.34, v: 0.34 },
+    { color: [9.6, 1.2, 5.6], radius: 0.12, stretch: 0.62, u: 0.63, v: 0.19 },
+    { color: [8.0, 6.8, 4.9], radius: 0.066, stretch: 0.5, u: 0.86, v: 0.43 },
+    { color: [1.6, 2.8, 9.2], radius: 0.16, stretch: 0.78, u: 0.72, v: 0.72 },
   ];
 
   for (let y = 0; y < height; y += 1) {
@@ -1119,9 +1119,9 @@ function createHdrEnvironmentTexture() {
       let green = 0.018 + horizon * 0.085 + ceilingGlow * 0.018 + floorGlow * 0.024;
       let blue = 0.05 + horizon * 0.24 + ceilingGlow * 0.12 + floorGlow * 0.06;
 
-      red += sweep * 1.35 + oppositeSweep * 0.18;
-      green += sweep * 0.2 + oppositeSweep * 0.9;
-      blue += sweep * 2.4 + oppositeSweep * 1.7;
+      red += sweep * 0.58 + oppositeSweep * 0.08;
+      green += sweep * 0.1 + oppositeSweep * 0.42;
+      blue += sweep * 1.05 + oppositeSweep * 0.82;
 
       lightDomes.forEach((light) => {
         const du = Math.min(Math.abs(u - light.u), 1 - Math.abs(u - light.u));
