@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PaperNight - PDF Dark Mode Converter</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="./vendor/pdf.min.js"></script>
+    <script defer src="./vendor/pdf-lib.min.js"></script>
+    <script defer src="./vendor/lucide.min.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <h1>PaperNight</h1>
+            <span id="fileMeta" class="file-meta">No PDF loaded</span>
+          </div>
+        </div>
+
+        <div class="top-actions">
+          <span class="privacy-pill" title="Processing happens in this browser">
+            <i data-lucide="shield-check" aria-hidden="true"></i>
+            Local only
+          </span>
+          <button class="button secondary" type="button" id="openButton">
+            <i data-lucide="folder-open" aria-hidden="true"></i>
+            Open PDF
+          </button>
+          <button class="button primary" type="button" id="convertButton" disabled>
+            <i data-lucide="moon" aria-hidden="true"></i>
+            Convert
+          </button>
+          <a class="button download disabled" id="downloadLink" aria-disabled="true">
+            <i data-lucide="download" aria-hidden="true"></i>
+            Download
+          </a>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-panel" aria-label="Conversion settings">
+          <section class="upload-zone" id="dropZone">
+            <input id="fileInput" type="file" accept="application/pdf,.pdf" />
+            <i data-lucide="upload-cloud" aria-hidden="true"></i>
+            <strong>Drop PDF</strong>
+            <span>or choose a file</span>
+          </section>
+
+          <section class="control-section" aria-label="Color settings">
+            <div class="section-heading">
+              <span>Palette</span>
+              <button class="icon-button" type="button" id="resetPalette" title="Reset palette" aria-label="Reset palette">
+                <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <label class="field-row">
+              <span>Background</span>
+              <input id="backgroundColor" type="color" value="#101615" />
+            </label>
+
+            <label class="field-row">
+              <span>Text</span>
+              <input id="textColor" type="color" value="#f3efe3" />
+            </label>
+
+            <label class="slider-row">
+              <span>Contrast</span>
+              <output id="contrastValue" for="contrastRange">108%</output>
+              <input id="contrastRange" type="range" min="80" max="145" value="108" />
+            </label>
+          </section>
+
+          <section class="control-section" aria-label="Output settings">
+            <div class="section-heading">
+              <span>Output</span>
+            </div>
+
+            <label class="toggle-row">
+              <span>Preserve images</span>
+              <input id="preserveImages" type="checkbox" checked />
+            </label>
+
+            <label class="field-row">
+              <span>Quality</span>
+              <select id="qualitySelect">
+                <option value="compact">Compact</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="crisp">Crisp</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="control-section" aria-label="Progress">
+            <div class="section-heading">
+              <span>Status</span>
+            </div>
+            <div class="progress-shell">
+              <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <p class="status-line" id="statusLine">Ready</p>
+          </section>
+        </aside>
+
+        <section class="preview-workspace" aria-label="PDF preview">
+          <div class="preview-toolbar">
+            <div class="page-controls">
+              <button class="icon-button" type="button" id="prevPage" title="Previous page" aria-label="Previous page" disabled>
+                <i data-lucide="chevron-left" aria-hidden="true"></i>
+              </button>
+              <span id="pageIndicator">Page - / -</span>
+              <button class="icon-button" type="button" id="nextPage" title="Next page" aria-label="Next page" disabled>
+                <i data-lucide="chevron-right" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <div class="segmented" role="group" aria-label="Preview mode">
+              <button type="button" class="segment active" data-preview-mode="split">Split</button>
+              <button type="button" class="segment" data-preview-mode="dark">Dark</button>
+              <button type="button" class="segment" data-preview-mode="original">Original</button>
+            </div>
+
+            <label class="zoom-control">
+              <i data-lucide="search" aria-hidden="true"></i>
+              <input id="zoomRange" type="range" min="70" max="150" value="100" />
+              <span id="zoomValue">100%</span>
+            </label>
+          </div>
+
+          <div class="preview-frame" id="previewFrame" data-mode="split">
+            <div class="empty-state" id="emptyState">
+              <i data-lucide="file-up" aria-hidden="true"></i>
+              <strong>Drop PDF</strong>
+              <span>Preview and convert in one workspace.</span>
+            </div>
+
+            <article class="page-panel original-panel" aria-label="Original page">
+              <div class="panel-label">Original</div>
+              <canvas id="originalCanvas"></canvas>
+            </article>
+
+            <article class="page-panel dark-panel" aria-label="Dark-mode page">
+              <div class="panel-label">Preview</div>
+              <canvas id="darkCanvas"></canvas>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
