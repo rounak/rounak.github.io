@@ -1,17 +1,7 @@
 const DEFAULT_SETTINGS = {
   background: "#101615",
-  text: "#f3efe3",
-  contrast: 108,
-  preserveImages: true,
-  quality: "balanced",
   zoom: 100,
   previewMode: "split",
-};
-
-const QUALITY_SETTINGS = {
-  compact: { scale: 1.2, format: "jpg", quality: 0.86 },
-  balanced: { scale: 1.55, format: "jpg", quality: 0.92 },
-  crisp: { scale: 2, format: "png", quality: 1 },
 };
 
 const state = {
@@ -46,11 +36,6 @@ function cacheDom() {
     "dropZone",
     "fileInput",
     "backgroundColor",
-    "textColor",
-    "contrastRange",
-    "contrastValue",
-    "preserveImages",
-    "qualitySelect",
     "resetPalette",
     "progressBar",
     "statusLine",
@@ -124,34 +109,8 @@ function bindEvents() {
     renderDarkPreviewOnly();
   });
 
-  dom.textColor.addEventListener("input", (event) => {
-    state.settings.text = event.target.value;
-    invalidateDownload();
-    renderDarkPreviewOnly();
-  });
-
-  dom.contrastRange.addEventListener("input", (event) => {
-    state.settings.contrast = Number(event.target.value);
-    dom.contrastValue.value = `${state.settings.contrast}%`;
-    invalidateDownload();
-    renderDarkPreviewOnly();
-  });
-
-  dom.preserveImages.addEventListener("change", (event) => {
-    state.settings.preserveImages = event.target.checked;
-    invalidateDownload();
-    renderDarkPreviewOnly();
-  });
-
-  dom.qualitySelect.addEventListener("change", (event) => {
-    state.settings.quality = event.target.value;
-    invalidateDownload();
-  });
-
   dom.resetPalette.addEventListener("click", () => {
     state.settings.background = DEFAULT_SETTINGS.background;
-    state.settings.text = DEFAULT_SETTINGS.text;
-    state.settings.contrast = DEFAULT_SETTINGS.contrast;
     syncControls();
     invalidateDownload();
     renderDarkPreviewOnly();
@@ -192,11 +151,6 @@ function bindEvents() {
 
 function syncControls() {
   dom.backgroundColor.value = state.settings.background;
-  dom.textColor.value = state.settings.text;
-  dom.contrastRange.value = String(state.settings.contrast);
-  dom.contrastValue.value = `${state.settings.contrast}%`;
-  dom.preserveImages.checked = state.settings.preserveImages;
-  dom.qualitySelect.value = state.settings.quality;
   dom.zoomRange.value = String(state.settings.zoom);
   dom.zoomValue.textContent = `${state.settings.zoom}%`;
   dom.previewFrame.dataset.mode = state.settings.previewMode;
@@ -322,17 +276,13 @@ function paintDarkCanvas(sourceImageData, canvas) {
 function applyDarkMode(imageData, settings) {
   const data = imageData.data;
   const background = hexToRgb(settings.background);
-  const text = hexToRgb(settings.text);
-  const contrast = settings.contrast / 100;
-  const preserveImages = settings.preserveImages;
+  const overlay = vectorOverlayColor(settings.background);
 
   for (let index = 0; index < data.length; index += 4) {
     const alpha = data[index + 3] / 255;
     const red = data[index];
     const green = data[index + 1];
     const blue = data[index + 2];
-    const luminance = relativeLuminance(red, green, blue);
-    const saturation = colorSaturation(red, green, blue);
 
     if (alpha < 0.04) {
       data[index] = background.r;
@@ -342,47 +292,13 @@ function applyDarkMode(imageData, settings) {
       continue;
     }
 
-    if (preserveImages && isLikelyColorContent(luminance, saturation)) {
-      const preserved = toneMapColor(red, green, blue, luminance, background);
-      data[index] = preserved.r;
-      data[index + 1] = preserved.g;
-      data[index + 2] = preserved.b;
-      data[index + 3] = 255;
-      continue;
-    }
-
-    let ink = 1 - luminance;
-    ink = (ink - 0.5) * contrast + 0.5;
-    ink = clamp(ink, 0, 1);
-    ink = smoothStep(0.02, 0.98, ink);
-
-    data[index] = Math.round(mix(background.r, text.r, ink));
-    data[index + 1] = Math.round(mix(background.g, text.g, ink));
-    data[index + 2] = Math.round(mix(background.b, text.b, ink));
+    data[index] = Math.abs(red - overlay.r);
+    data[index + 1] = Math.abs(green - overlay.g);
+    data[index + 2] = Math.abs(blue - overlay.b);
     data[index + 3] = 255;
   }
 
   return imageData;
-}
-
-function isLikelyColorContent(luminance, saturation) {
-  return saturation > 0.18 && luminance > 0.08 && luminance < 0.94;
-}
-
-function toneMapColor(red, green, blue, luminance, background) {
-  const targetLuminance = luminance > 0.72 ? 0.58 : Math.max(0.18, luminance * 0.78 + 0.05);
-  const factor = targetLuminance / Math.max(luminance, 0.01);
-  const mapped = {
-    r: clamp(Math.round(red * factor), 0, 255),
-    g: clamp(Math.round(green * factor), 0, 255),
-    b: clamp(Math.round(blue * factor), 0, 255),
-  };
-
-  return {
-    r: Math.round(mix(background.r, mapped.r, 0.82)),
-    g: Math.round(mix(background.g, mapped.g, 0.82)),
-    b: Math.round(mix(background.b, mapped.b, 0.82)),
-  };
 }
 
 async function convertPdf() {
@@ -396,33 +312,31 @@ async function convertPdf() {
   dom.downloadLink.setAttribute("aria-disabled", "true");
 
   try {
-    const quality = QUALITY_SETTINGS[state.settings.quality] || QUALITY_SETTINGS.balanced;
-    const outputPdf = await window.PDFLib.PDFDocument.create();
+    const { BlendMode, PDFDocument, rgb } = window.PDFLib;
+    const sourcePdf = await PDFDocument.load(state.fileBytes);
+    const outputPdf = await PDFDocument.create();
+    const pageIndices = sourcePdf.getPageIndices();
+    const copiedPages = await outputPdf.copyPages(sourcePdf, pageIndices);
+    const overlay = vectorOverlayColor(state.settings.background);
+    const overlayColor = rgb(overlay.r / 255, overlay.g / 255, overlay.b / 255);
 
-    for (let pageNumber = 1; pageNumber <= state.pageCount; pageNumber += 1) {
-      setStatus(`Converting page ${pageNumber} of ${state.pageCount}...`, pageNumber / state.pageCount * 92);
+    for (let index = 0; index < copiedPages.length; index += 1) {
+      const pageNumber = index + 1;
+      const page = copiedPages[index];
+      const { width, height } = page.getSize();
 
-      const page = await state.pdf.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const renderCanvas = document.createElement("canvas");
-      const renderedImage = await renderPageToImageData(page, quality.scale, renderCanvas);
-      const darkImage = applyDarkMode(renderedImage, state.settings);
-      const imageBytes = await canvasToImageBytes(renderCanvas, darkImage, quality);
-      const embeddedImage =
-        quality.format === "png"
-          ? await outputPdf.embedPng(imageBytes)
-          : await outputPdf.embedJpg(imageBytes);
+      setStatus(`Converting page ${pageNumber} of ${copiedPages.length}...`, pageNumber / copiedPages.length * 92);
+      outputPdf.addPage(page);
+      prependWhitePageBackground(outputPdf, page, width, height);
 
-      const pdfPage = outputPdf.addPage([baseViewport.width, baseViewport.height]);
-      pdfPage.drawImage(embeddedImage, {
+      page.drawRectangle({
         x: 0,
         y: 0,
-        width: baseViewport.width,
-        height: baseViewport.height,
+        width,
+        height,
+        color: overlayColor,
+        blendMode: BlendMode.Difference,
       });
-
-      renderCanvas.width = 1;
-      renderCanvas.height = 1;
     }
 
     setStatus("Building download...", 96);
@@ -438,48 +352,25 @@ async function convertPdf() {
   }
 }
 
-async function renderPageToImageData(page, scale, canvas) {
-  const viewport = page.getViewport({ scale });
-  const width = Math.ceil(viewport.width);
-  const height = Math.ceil(viewport.height);
-  canvas.width = width;
-  canvas.height = height;
+function prependWhitePageBackground(pdfDoc, page, width, height) {
+  const {
+    fill,
+    popGraphicsState,
+    pushGraphicsState,
+    rectangle,
+    setFillingRgbColor,
+  } = window.PDFLib;
 
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, width, height);
-
-  await page.render({
-    canvasContext: context,
-    viewport,
-    background: "rgba(255,255,255,1)",
-  }).promise;
-
-  return context.getImageData(0, 0, width, height);
-}
-
-async function canvasToImageBytes(canvas, imageData, quality) {
-  const context = canvas.getContext("2d");
-  context.putImageData(imageData, 0, 0);
-  const mimeType = quality.format === "png" ? "image/png" : "image/jpeg";
-  const blob = await canvasToBlob(canvas, mimeType, quality.quality);
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-function canvasToBlob(canvas, mimeType, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(new Error("Could not encode canvas."));
-        }
-      },
-      mimeType,
-      quality,
-    );
-  });
+  page.node.normalize();
+  const backgroundStream = page.createContentStream(
+    pushGraphicsState(),
+    setFillingRgbColor(1, 1, 1),
+    rectangle(0, 0, width, height),
+    fill(),
+    popGraphicsState(),
+  );
+  const backgroundRef = pdfDoc.context.register(backgroundStream);
+  page.node.Contents().insert(0, backgroundRef);
 }
 
 function setDownloadBlob(blob) {
@@ -551,23 +442,13 @@ function hexToRgb(hex) {
   };
 }
 
-function relativeLuminance(red, green, blue) {
-  return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-}
-
-function colorSaturation(red, green, blue) {
-  const max = Math.max(red, green, blue);
-  const min = Math.min(red, green, blue);
-  return max === 0 ? 0 : (max - min) / max;
-}
-
-function smoothStep(edge0, edge1, value) {
-  const x = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return x * x * (3 - 2 * x);
-}
-
-function mix(start, end, amount) {
-  return start + (end - start) * amount;
+function vectorOverlayColor(backgroundHex) {
+  const background = hexToRgb(backgroundHex);
+  return {
+    r: 255 - background.r,
+    g: 255 - background.g,
+    b: 255 - background.b,
+  };
 }
 
 function clamp(value, min, max) {

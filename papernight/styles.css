@@ -284,6 +284,12 @@ h1 {
   font-size: 0.92rem;
 }
 
+.static-value {
+  color: var(--muted-strong);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 input[type="color"] {
   width: 52px;
   height: 34px;

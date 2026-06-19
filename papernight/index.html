@@ -62,17 +62,6 @@
               <span>Background</span>
               <input id="backgroundColor" type="color" value="#101615" />
             </label>
-
-            <label class="field-row">
-              <span>Text</span>
-              <input id="textColor" type="color" value="#f3efe3" />
-            </label>
-
-            <label class="slider-row">
-              <span>Contrast</span>
-              <output id="contrastValue" for="contrastRange">108%</output>
-              <input id="contrastRange" type="range" min="80" max="145" value="108" />
-            </label>
           </section>
 
           <section class="control-section" aria-label="Output settings">
@@ -80,18 +69,14 @@
               <span>Output</span>
             </div>
 
-            <label class="toggle-row">
-              <span>Preserve images</span>
-              <input id="preserveImages" type="checkbox" checked />
+            <label class="field-row">
+              <span>Mode</span>
+              <span class="static-value">Vector</span>
             </label>
 
             <label class="field-row">
-              <span>Quality</span>
-              <select id="qualitySelect">
-                <option value="compact">Compact</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="crisp">Crisp</option>
-              </select>
+              <span>Images</span>
+              <span class="static-value">Invert</span>
             </label>
           </section>
 
