@@ -1,8 +1,7 @@
 # PaperNight
 
-PaperNight is a static, browser-only PDF dark-mode converter. It previews pages
-locally and exports a vector-preserving dark PDF without rasterizing pages into
-images.
+PaperNight is a static, browser-only PDF dark-mode converter. Choose a PDF,
+press Convert, and the dark-mode PDF downloads automatically.
 
 ## Run locally
 
